@@ -44,11 +44,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/dkropachev/xhtmlx.git"
+    "url": "https://github.com/teryxjs/xhtmlx.git"
   },
-  "homepage": "https://github.com/dkropachev/xhtmlx#readme",
+  "homepage": "https://github.com/teryxjs/xhtmlx#readme",
   "bugs": {
-    "url": "https://github.com/dkropachev/xhtmlx/issues"
+    "url": "https://github.com/teryxjs/xhtmlx/issues"
   },
   "author": "dkropachev",
   "license": "MIT",
