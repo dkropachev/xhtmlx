@@ -298,6 +298,20 @@
    * @returns {boolean} false if the element was removed by xh-if/xh-unless
    */
   function applyBindings(el, ctx) {
+    // -- xh-show ----------------------------------------------------------------
+    var showAttr = el.getAttribute("xh-show");
+    if (showAttr != null) {
+      var sval = ctx.resolve(showAttr);
+      el.style.display = sval ? "" : "none";
+    }
+
+    // -- xh-hide ----------------------------------------------------------------
+    var hideAttr = el.getAttribute("xh-hide");
+    if (hideAttr != null) {
+      var hdval = ctx.resolve(hideAttr);
+      el.style.display = hdval ? "none" : "";
+    }
+
     // -- xh-if ----------------------------------------------------------------
     var ifAttr = el.getAttribute("xh-if");
     if (ifAttr != null) {
@@ -341,6 +355,45 @@
         var aval = ctx.resolve(attrs[i].value);
         if (aval != null) {
           el.setAttribute(targetAttr, String(aval));
+        }
+      }
+    }
+
+    // -- xh-model ---------------------------------------------------------------
+    var modelAttr = el.getAttribute("xh-model");
+    if (modelAttr != null) {
+      var mv = ctx.resolve(modelAttr);
+      var tag = el.tagName.toLowerCase();
+      var type = (el.getAttribute("type") || "").toLowerCase();
+
+      if (tag === "select") {
+        // Set the matching option as selected
+        var options = el.options;
+        for (var s = 0; s < options.length; s++) {
+          options[s].selected = (options[s].value == mv);
+        }
+      } else if (type === "checkbox") {
+        el.checked = !!mv;
+      } else if (type === "radio") {
+        el.checked = (el.value == mv);
+      } else if (tag === "textarea") {
+        el.value = mv != null ? String(mv) : "";
+      } else {
+        // text, email, number, hidden, etc.
+        el.value = mv != null ? String(mv) : "";
+      }
+    }
+
+    // -- xh-class-* -------------------------------------------------------------
+    for (var c = attrs.length - 1; c >= 0; c--) {
+      var cName = attrs[c].name;
+      if (cName.indexOf("xh-class-") === 0) {
+        var className = cName.slice(9); // after "xh-class-"
+        var cval = ctx.resolve(attrs[c].value);
+        if (cval) {
+          el.classList.add(className);
+        } else {
+          el.classList.remove(className);
         }
       }
     }
@@ -568,6 +621,26 @@
         }
       } catch (e) {
         console.error("[xhtmlx] invalid JSON in xh-vals:", valsAttr, e);
+      }
+    }
+
+    // Collect xh-model values from the element's scope
+    var scope = form || el.closest("[xh-get],[xh-post],[xh-put],[xh-patch],[xh-delete]") || el;
+    var modelInputs = scope.querySelectorAll("[xh-model]");
+    for (var m = 0; m < modelInputs.length; m++) {
+      var mEl = modelInputs[m];
+      var field = mEl.getAttribute("xh-model");
+      var mTag = mEl.tagName.toLowerCase();
+      var mType = (mEl.getAttribute("type") || "").toLowerCase();
+
+      if (mType === "checkbox") {
+        body[field] = mEl.checked;
+      } else if (mType === "radio") {
+        if (mEl.checked) body[field] = mEl.value;
+      } else if (mTag === "select") {
+        body[field] = mEl.value;
+      } else {
+        body[field] = mEl.value;
       }
     }
 
@@ -1342,7 +1415,8 @@
       "[xh-text]", "[xh-html]", "[xh-each]", "[xh-if]", "[xh-unless]",
       "[xh-trigger]", "[xh-template]", "[xh-target]", "[xh-swap]",
       "[xh-indicator]", "[xh-vals]", "[xh-headers]",
-      "[xh-error-template]", "[xh-error-target]"
+      "[xh-error-template]", "[xh-error-target]",
+      "[xh-model]", "[xh-show]", "[xh-hide]"
     ];
 
     // Also match xh-attr-* and xh-error-template-*
@@ -1369,7 +1443,8 @@
       var attrs = allEls[j].attributes;
       for (var k = 0; k < attrs.length; k++) {
         if (attrs[k].name.indexOf("xh-attr-") === 0 ||
-            attrs[k].name.indexOf("xh-error-template-") === 0) {
+            attrs[k].name.indexOf("xh-error-template-") === 0 ||
+            attrs[k].name.indexOf("xh-class-") === 0) {
           results.push(allEls[j]);
           seen.add(allEls[j]);
           break;
