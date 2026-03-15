@@ -3,11 +3,13 @@
   "version": "0.1.0",
   "description": "Declarative HTML attributes for REST API driven UIs. Like htmx, but with JSON APIs and client-side rendering.",
   "main": "xhtmlx.js",
+  "types": "xhtmlx.d.ts",
   "browser": "xhtmlx.js",
   "unpkg": "xhtmlx.min.js",
   "jsdelivr": "xhtmlx.min.js",
   "files": [
     "xhtmlx.js",
+    "xhtmlx.d.ts",
     "xhtmlx.min.js",
     "xhtmlx.min.js.map",
     "README.md",
