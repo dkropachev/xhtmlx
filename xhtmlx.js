@@ -138,6 +138,65 @@
   }
 
   // ---------------------------------------------------------------------------
+  // MutableDataContext — reactive wrapper around DataContext
+  // ---------------------------------------------------------------------------
+
+  /**
+   * A DataContext subclass that supports live reactivity.
+   * When a field is changed via set(), all subscribers for that path are notified.
+   *
+   * @param {*}           data   – The JSON payload for this level.
+   * @param {DataContext}  parent – Enclosing context (null at root).
+   * @param {number|null}  index  – Current iteration index for xh-each.
+   */
+  function MutableDataContext(data, parent, index) {
+    DataContext.call(this, data, parent, index);
+    this._subscribers = {}; // path -> [callback]
+  }
+  MutableDataContext.prototype = Object.create(DataContext.prototype);
+  MutableDataContext.prototype.constructor = MutableDataContext;
+
+  /**
+   * Set a value at the given dotted path, creating intermediate objects as needed.
+   * Notifies all subscribers for the given path.
+   *
+   * @param {string} path  – e.g. "user.name"
+   * @param {*}      value – The new value.
+   */
+  MutableDataContext.prototype.set = function(path, value) {
+    var parts = path.split(".");
+    var obj = this.data;
+    for (var i = 0; i < parts.length - 1; i++) {
+      if (obj[parts[i]] == null) obj[parts[i]] = {};
+      obj = obj[parts[i]];
+    }
+    obj[parts[parts.length - 1]] = value;
+    this._notify(path);
+  };
+
+  /**
+   * Subscribe to changes on a given path.
+   *
+   * @param {string}   path     – The dotted path to watch.
+   * @param {Function} callback – Called when the value at path changes.
+   */
+  MutableDataContext.prototype.subscribe = function(path, callback) {
+    if (!this._subscribers[path]) this._subscribers[path] = [];
+    this._subscribers[path].push(callback);
+  };
+
+  /**
+   * Notify all subscribers for a given path.
+   * @param {string} path
+   */
+  MutableDataContext.prototype._notify = function(path) {
+    var subs = this._subscribers[path];
+    if (subs) {
+      for (var i = 0; i < subs.length; i++) subs[i]();
+    }
+  };
+
+  // ---------------------------------------------------------------------------
   // Interpolation  — {{field}} replacement
   // ---------------------------------------------------------------------------
 
@@ -303,6 +362,14 @@
     if (showAttr != null) {
       var sval = ctx.resolve(showAttr);
       el.style.display = sval ? "" : "none";
+      if (ctx instanceof MutableDataContext) {
+        (function(field, element, context) {
+          context.subscribe(field, function() {
+            var newVal = context.resolve(field);
+            element.style.display = newVal ? "" : "none";
+          });
+        })(showAttr, el, ctx);
+      }
     }
 
     // -- xh-hide ----------------------------------------------------------------
@@ -310,6 +377,14 @@
     if (hideAttr != null) {
       var hdval = ctx.resolve(hideAttr);
       el.style.display = hdval ? "none" : "";
+      if (ctx instanceof MutableDataContext) {
+        (function(field, element, context) {
+          context.subscribe(field, function() {
+            var newVal = context.resolve(field);
+            element.style.display = newVal ? "none" : "";
+          });
+        })(hideAttr, el, ctx);
+      }
     }
 
     // -- xh-if ----------------------------------------------------------------
@@ -337,6 +412,14 @@
     if (textAttr != null) {
       var tv = ctx.resolve(textAttr);
       el.textContent = tv != null ? String(tv) : "";
+      if (ctx instanceof MutableDataContext) {
+        (function(field, element, context) {
+          context.subscribe(field, function() {
+            var newVal = context.resolve(field);
+            element.textContent = newVal != null ? String(newVal) : "";
+          });
+        })(textAttr, el, ctx);
+      }
     }
 
     // -- xh-html --------------------------------------------------------------
@@ -344,6 +427,14 @@
     if (htmlAttr != null) {
       var hv = ctx.resolve(htmlAttr);
       el.innerHTML = hv != null ? String(hv) : "";
+      if (ctx instanceof MutableDataContext) {
+        (function(field, element, context) {
+          context.subscribe(field, function() {
+            var newVal = context.resolve(field);
+            element.innerHTML = newVal != null ? String(newVal) : "";
+          });
+        })(htmlAttr, el, ctx);
+      }
     }
 
     // -- xh-attr-* ------------------------------------------------------------
@@ -355,6 +446,16 @@
         var aval = ctx.resolve(attrs[i].value);
         if (aval != null) {
           el.setAttribute(targetAttr, String(aval));
+        }
+        if (ctx instanceof MutableDataContext) {
+          (function(field, tAttr, element, context) {
+            context.subscribe(field, function() {
+              var newVal = context.resolve(field);
+              if (newVal != null) {
+                element.setAttribute(tAttr, String(newVal));
+              }
+            });
+          })(attrs[i].value, targetAttr, el, ctx);
         }
       }
     }
@@ -382,6 +483,22 @@
         // text, email, number, hidden, etc.
         el.value = mv != null ? String(mv) : "";
       }
+
+      // Live reactivity: when the user edits an xh-model input, call ctx.set()
+      if (ctx instanceof MutableDataContext) {
+        (function(field, element, context) {
+          var eventName = (type === "checkbox" || type === "radio" || tag === "select") ? "change" : "input";
+          element.addEventListener(eventName, function() {
+            var newValue;
+            if (type === "checkbox") {
+              newValue = element.checked;
+            } else {
+              newValue = element.value;
+            }
+            context.set(field, newValue);
+          });
+        })(modelAttr, el, ctx);
+      }
     }
 
     // -- xh-class-* -------------------------------------------------------------
@@ -394,6 +511,18 @@
           el.classList.add(className);
         } else {
           el.classList.remove(className);
+        }
+        if (ctx instanceof MutableDataContext) {
+          (function(field, clsName, element, context) {
+            context.subscribe(field, function() {
+              var newVal = context.resolve(field);
+              if (newVal) {
+                element.classList.add(clsName);
+              } else {
+                element.classList.remove(clsName);
+              }
+            });
+          })(attrs[c].value, className, el, ctx);
         }
       }
     }
@@ -434,7 +563,8 @@
       var clone = el.cloneNode(true);
       // Mark clone so renderTemplate's second pass doesn't rebind with wrong context
       clone.setAttribute("data-xh-each-item", "");
-      var itemCtx = new DataContext(item, ctx, idx);
+      var ItemCtxClass = (ctx instanceof MutableDataContext) ? MutableDataContext : DataContext;
+      var itemCtx = new ItemCtxClass(item, ctx, idx);
       applyBindings(clone, itemCtx);
       // Process children bindings
       processBindingsInTree(clone, itemCtx);
@@ -1032,8 +1162,14 @@
     var gen = (generationMap.get(el) || 0) + 1;
     generationMap.set(el, gen);
 
-    // Mark request in-flight
+    // -- Request deduplication: skip if already in-flight ---------------------
     var state = elementStates.get(el);
+    if (state && state.requestInFlight) {
+      if (config.debug) console.warn("[xhtmlx] request already in-flight, skipping");
+      return;
+    }
+
+    // Mark request in-flight
     if (state) state.requestInFlight = true;
 
     // Interpolate URL with URI encoding
@@ -1069,6 +1205,10 @@
 
     // Show indicator
     showIndicator(el);
+
+    // xh-disabled-class: add CSS class while request is in-flight
+    var disabledClass = el.getAttribute("xh-disabled-class");
+    if (disabledClass) el.classList.add(disabledClass);
 
     fetch(url, fetchOpts)
       .then(function (response) {
@@ -1109,7 +1249,7 @@
             }
           }
 
-          var childCtx = new DataContext(jsonData, ctx);
+          var childCtx = new MutableDataContext(jsonData, ctx);
 
           // Resolve and render template
           return resolveTemplate(el, templateStack).then(function (tmpl) {
@@ -1160,6 +1300,7 @@
       })
       .finally(function () {
         hideIndicator(el);
+        if (disabledClass) el.classList.remove(disabledClass);
         if (state) state.requestInFlight = false;
       });
   }
@@ -1416,7 +1557,8 @@
       "[xh-trigger]", "[xh-template]", "[xh-target]", "[xh-swap]",
       "[xh-indicator]", "[xh-vals]", "[xh-headers]",
       "[xh-error-template]", "[xh-error-target]",
-      "[xh-model]", "[xh-show]", "[xh-hide]"
+      "[xh-model]", "[xh-show]", "[xh-hide]",
+      "[xh-disabled-class]"
     ];
 
     // Also match xh-attr-* and xh-error-template-*
@@ -1444,7 +1586,8 @@
       for (var k = 0; k < attrs.length; k++) {
         if (attrs[k].name.indexOf("xh-attr-") === 0 ||
             attrs[k].name.indexOf("xh-error-template-") === 0 ||
-            attrs[k].name.indexOf("xh-class-") === 0) {
+            attrs[k].name.indexOf("xh-class-") === 0 ||
+            attrs[k].name.indexOf("xh-on-") === 0) {
           results.push(allEls[j]);
           seen.add(allEls[j]);
           break;
@@ -1453,6 +1596,51 @@
     }
 
     return results;
+  }
+
+  // ---------------------------------------------------------------------------
+  // xh-on-* event handler helper
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Attach a declarative event handler for xh-on-{event} directives.
+   *
+   * @param {Element} el        – The element to attach the handler to.
+   * @param {string}  event     – The DOM event name (e.g. "click", "dblclick").
+   * @param {string}  actionStr – The action string (e.g. "toggleClass:active").
+   */
+  function attachOnHandler(el, event, actionStr) {
+    el.addEventListener(event, function(evt) {
+      var parts = actionStr.split(":");
+      var action = parts[0];
+      var arg = parts.slice(1).join(":");
+
+      switch (action) {
+        case "toggleClass":
+          el.classList.toggle(arg);
+          break;
+        case "addClass":
+          el.classList.add(arg);
+          break;
+        case "removeClass":
+          el.classList.remove(arg);
+          break;
+        case "remove":
+          el.remove();
+          break;
+        case "toggle":
+          var target = document.querySelector(arg);
+          if (target) {
+            target.style.display = target.style.display === "none" ? "" : "none";
+          }
+          break;
+        case "dispatch":
+          el.dispatchEvent(new CustomEvent(arg, { bubbles: true, detail: {} }));
+          break;
+        default:
+          if (config.debug) console.warn("[xhtmlx] unknown xh-on action:", action);
+      }
+    });
   }
 
   /**
@@ -1468,6 +1656,20 @@
     // (e.g. MutationObserver + explicit process() call)
     var existing = elementStates.get(el);
     if (existing && existing.processed) return;
+
+    // -- xh-on-* event handlers -----------------------------------------------
+    var onAttrs = [];
+    for (var oa = 0; oa < el.attributes.length; oa++) {
+      if (el.attributes[oa].name.indexOf("xh-on-") === 0) {
+        onAttrs.push({
+          event: el.attributes[oa].name.slice(6),
+          action: el.attributes[oa].value
+        });
+      }
+    }
+    for (var ob = 0; ob < onAttrs.length; ob++) {
+      attachOnHandler(el, onAttrs[ob].event, onAttrs[ob].action);
+    }
 
     var restInfo = getRestVerb(el);
 
@@ -1613,6 +1815,7 @@
     // --- Internals exposed for testing (not part of the public API) ----------
     _internals: {
       DataContext: DataContext,
+      MutableDataContext: MutableDataContext,
       interpolate: interpolate,
       parseTrigger: parseTrigger,
       parseTimeValue: parseTimeValue,
@@ -1620,6 +1823,9 @@
       applyBindings: applyBindings,
       processEach: processEach,
       processBindingsInTree: processBindingsInTree,
+      processElement: processElement,
+      attachOnHandler: attachOnHandler,
+      executeRequest: executeRequest,
       resolveErrorTemplate: resolveErrorTemplate,
       findErrorBoundary: findErrorBoundary,
       getRestVerb: getRestVerb,
