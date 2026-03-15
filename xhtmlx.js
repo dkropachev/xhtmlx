@@ -59,7 +59,8 @@
       ".xh-indicator { opacity: 0; transition: opacity 200ms ease-in; }\n" +
       ".xh-request .xh-indicator, .xh-request.xh-indicator { opacity: 1; }\n" +
       ".xh-added { }\n" +
-      ".xh-settled { }\n";
+      ".xh-settled { }\n" +
+      ".xh-invalid { border-color: #ef4444; }\n";
     document.head.appendChild(style);
   }
 
@@ -1252,6 +1253,89 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Validation
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Validate fields within the scope of an element.
+   * Looks for [xh-validate] elements in the form or element scope and checks
+   * rules: required, pattern, min/max, minlength/maxlength.
+   *
+   * @param {Element} el – The element that triggered the request.
+   * @returns {boolean} true if all valid, false if errors found.
+   */
+  function validateElement(el) {
+    var scope = el.tagName.toLowerCase() === "form" ? el : el.closest("form") || el;
+    var fields = scope.querySelectorAll("[xh-validate]");
+    var errors = [];
+
+    for (var i = 0; i < fields.length; i++) {
+      var field = fields[i];
+      var rules = field.getAttribute("xh-validate").split(" ");
+      var value = field.value || "";
+      var fieldName = field.getAttribute("name") || field.getAttribute("xh-model") || "field";
+      var customMsg = field.getAttribute("xh-validate-message");
+      var errorClass = field.getAttribute("xh-validate-class") || "xh-invalid";
+      var errorTarget = field.getAttribute("xh-validate-target");
+      var error = null;
+
+      for (var r = 0; r < rules.length; r++) {
+        var rule = rules[r];
+        if (rule === "required" && !value.trim()) {
+          error = customMsg || fieldName + " is required";
+        }
+      }
+
+      // xh-validate-pattern
+      var pattern = field.getAttribute("xh-validate-pattern");
+      if (pattern && value && !new RegExp(pattern).test(value)) {
+        error = customMsg || fieldName + " format is invalid";
+      }
+
+      // xh-validate-min / xh-validate-max
+      var min = field.getAttribute("xh-validate-min");
+      var max = field.getAttribute("xh-validate-max");
+      if (min != null && Number(value) < Number(min)) {
+        error = customMsg || fieldName + " must be at least " + min;
+      }
+      if (max != null && Number(value) > Number(max)) {
+        error = customMsg || fieldName + " must be at most " + max;
+      }
+
+      // xh-validate-minlength / xh-validate-maxlength
+      var minlen = field.getAttribute("xh-validate-minlength");
+      var maxlen = field.getAttribute("xh-validate-maxlength");
+      if (minlen != null && value.length < Number(minlen)) {
+        error = customMsg || fieldName + " must be at least " + minlen + " characters";
+      }
+      if (maxlen != null && value.length > Number(maxlen)) {
+        error = customMsg || fieldName + " must be at most " + maxlen + " characters";
+      }
+
+      if (error) {
+        field.classList.add(errorClass);
+        if (errorTarget) {
+          var tgt = document.querySelector(errorTarget);
+          if (tgt) tgt.textContent = error;
+        }
+        errors.push({ field: fieldName, message: error, element: field });
+      } else {
+        field.classList.remove(errorClass);
+        if (errorTarget) {
+          var tgt2 = document.querySelector(errorTarget);
+          if (tgt2) tgt2.textContent = "";
+        }
+      }
+    }
+
+    if (errors.length > 0) {
+      emitEvent(el, "xh:validationError", { errors: errors }, false);
+      return false;
+    }
+    return true;
+  }
+
+  // ---------------------------------------------------------------------------
   // Main request handler
   // ---------------------------------------------------------------------------
 
@@ -1323,12 +1407,25 @@
       return;
     }
 
+    // Validate before sending
+    if (!validateElement(el)) {
+      if (state) state.requestInFlight = false;
+      return;
+    }
+
     // Show indicator
     showIndicator(el);
 
+    // Accessibility: mark target as busy
+    var ariaTarget = getSwapTarget(el, false);
+    if (ariaTarget) ariaTarget.setAttribute("aria-busy", "true");
+
     // xh-disabled-class: add CSS class while request is in-flight
     var disabledClass = el.getAttribute("xh-disabled-class");
-    if (disabledClass) el.classList.add(disabledClass);
+    if (disabledClass) {
+      el.classList.add(disabledClass);
+      el.setAttribute("aria-disabled", "true");
+    }
 
     // -- Response caching (xh-cache) ------------------------------------------
     var cacheAttr = el.getAttribute("xh-cache");
@@ -1370,7 +1467,11 @@
       })
       .finally(function () {
         hideIndicator(el);
-        if (disabledClass) el.classList.remove(disabledClass);
+        if (ariaTarget) ariaTarget.removeAttribute("aria-busy");
+        if (disabledClass) {
+          el.classList.remove(disabledClass);
+          el.removeAttribute("aria-disabled");
+        }
         if (state) state.requestInFlight = false;
       });
 
@@ -1448,6 +1549,16 @@
 
             // Emit xh:afterSwap
             emitEvent(el, "xh:afterSwap", { target: target }, false);
+
+            // -- xh-focus: focus management after swap ----------------------------
+            var focusEl = el.getAttribute("xh-focus");
+            if (focusEl && focusEl !== "auto") {
+              var toFocus = document.querySelector(focusEl);
+              if (toFocus) toFocus.focus();
+            } else if (focusEl === "auto" && processTarget) {
+              var focusable = processTarget.querySelector("a, button, input, select, textarea, [tabindex]");
+              if (focusable) focusable.focus();
+            }
 
           } else {
             // Self-binding: apply bindings directly to the element
@@ -1542,6 +1653,9 @@
         if (processTarget) {
           processNode(processTarget, errorCtx, templateStack);
         }
+
+        // Accessibility: mark error container with role="alert"
+        errorTarget.setAttribute("role", "alert");
 
         el.classList.add(config.errorClass);
         emitEvent(el, "xh:afterSwap", { target: errorTarget, isError: true }, false);
@@ -2003,7 +2117,11 @@
       "[xh-cache]",
       "[xh-retry]",
       "[xh-ws]", "[xh-ws-send]",
-      "[xh-boost]"
+      "[xh-boost]",
+      "[xh-validate]",
+      "[xh-i18n]",
+      "[xh-router]", "[xh-route]",
+      "[xh-focus]", "[xh-aria-live]"
     ];
 
     // Also match xh-attr-* and xh-error-template-*
@@ -2032,7 +2150,8 @@
         if (attrs[k].name.indexOf("xh-attr-") === 0 ||
             attrs[k].name.indexOf("xh-error-template-") === 0 ||
             attrs[k].name.indexOf("xh-class-") === 0 ||
-            attrs[k].name.indexOf("xh-on-") === 0) {
+            attrs[k].name.indexOf("xh-on-") === 0 ||
+            attrs[k].name.indexOf("xh-i18n-") === 0) {
           results.push(allEls[j]);
           seen.add(allEls[j]);
           break;
@@ -2116,6 +2235,11 @@
       attachOnHandler(el, onAttrs[ob].event, onAttrs[ob].action);
     }
 
+    // -- i18n support -----------------------------------------------------------
+    if (el.hasAttribute("xh-i18n") || checkElementForI18nAttr(el)) {
+      applyI18n(el);
+    }
+
     if (el.hasAttribute("xh-ws")) {
       setupWebSocket(el, ctx, templateStack);
       var wState = elementStates.get(el) || {};
@@ -2131,6 +2255,16 @@
       var boostState = elementStates.get(el) || {};
       boostState.processed = true;
       elementStates.set(el, boostState);
+    }
+
+    // Accessibility: auto-set aria-live on xh-target elements
+    var targetSel = el.getAttribute("xh-target");
+    if (targetSel) {
+      var ariaLiveTarget = document.querySelector(targetSel);
+      if (ariaLiveTarget && !ariaLiveTarget.hasAttribute("aria-live")) {
+        var ariaLive = el.getAttribute("xh-aria-live") || "polite";
+        ariaLiveTarget.setAttribute("aria-live", ariaLive);
+      }
     }
 
     var restInfo = getRestVerb(el);
@@ -2224,6 +2358,238 @@
     }
     return false;
   }
+
+  /**
+   * Check if an element has any xh-i18n-{attr} attribute (not xh-i18n-vars).
+   * @param {Element} el
+   * @returns {boolean}
+   */
+  function checkElementForI18nAttr(el) {
+    if (!el.attributes) return false;
+    for (var i = 0; i < el.attributes.length; i++) {
+      var name = el.attributes[i].name;
+      if (name.indexOf("xh-i18n-") === 0 && name !== "xh-i18n-vars") return true;
+    }
+    return false;
+  }
+
+  // ---------------------------------------------------------------------------
+  // i18n — Internationalization support
+  // ---------------------------------------------------------------------------
+
+  var i18n = {
+    _locales: {},
+    _locale: null,
+    _fallback: "en",
+
+    load: function(locale, translations) {
+      i18n._locales[locale] = i18n._locales[locale] || {};
+      for (var k in translations) {
+        if (translations.hasOwnProperty(k)) {
+          i18n._locales[locale][k] = translations[k];
+        }
+      }
+    },
+
+    get locale() { return i18n._locale || i18n._fallback; },
+    set locale(val) {
+      i18n._locale = val;
+      if (typeof document !== "undefined") {
+        applyI18n(document.body);
+        emitEvent(document.body, "xh:localeChanged", { locale: val }, false);
+      }
+    },
+
+    t: function(key, vars) {
+      var locales = [i18n._locale, i18n._fallback];
+      for (var l = 0; l < locales.length; l++) {
+        if (!locales[l]) continue;
+        var dict = i18n._locales[locales[l]];
+        if (dict && dict[key] != null) {
+          var text = String(dict[key]);
+          if (vars) {
+            for (var v in vars) {
+              if (vars.hasOwnProperty(v)) {
+                text = text.replace(new RegExp("\\{" + v + "\\}", "g"), vars[v]);
+              }
+            }
+          }
+          return text;
+        }
+      }
+      return key; // fallback to key itself
+    }
+  };
+
+  /**
+   * Apply i18n translations to elements with xh-i18n and xh-i18n-{attr} attributes.
+   *
+   * @param {Element} root – The root element to scan.
+   */
+  function applyI18n(root) {
+    var els = root.querySelectorAll("[xh-i18n]");
+    for (var i = 0; i < els.length; i++) {
+      var key = els[i].getAttribute("xh-i18n");
+      var vars = els[i].getAttribute("xh-i18n-vars");
+      var parsedVars = null;
+      if (vars) {
+        try { parsedVars = JSON.parse(vars); } catch(e) { /* ignore */ }
+      }
+      els[i].textContent = i18n.t(key, parsedVars);
+    }
+
+    // xh-i18n-{attr} for attribute translations
+    var all = root.querySelectorAll("*");
+    for (var j = 0; j < all.length; j++) {
+      var attrs = all[j].attributes;
+      for (var a = 0; a < attrs.length; a++) {
+        var name = attrs[a].name;
+        if (name.indexOf("xh-i18n-") === 0 && name !== "xh-i18n-vars") {
+          var targetAttr = name.slice(8);
+          var attrKey = attrs[a].value;
+          all[j].setAttribute(targetAttr, i18n.t(attrKey));
+        }
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // SPA Router
+  // ---------------------------------------------------------------------------
+
+  var router = {
+    _routes: [],
+    _outlet: null,
+    _activeLink: null,
+    _activeClass: "xh-route-active",
+    _notFoundTemplate: null,
+
+    _init: function() {
+      // Scan for xh-router containers
+      if (typeof document === "undefined") return;
+      var containers = document.querySelectorAll("[xh-router]");
+      for (var c = 0; c < containers.length; c++) {
+        var outlet = containers[c].getAttribute("xh-router-outlet") || "#router-outlet";
+        router._outlet = document.querySelector(outlet);
+
+        var links = containers[c].querySelectorAll("[xh-route]");
+        for (var l = 0; l < links.length; l++) {
+          var link = links[l];
+          var route = {
+            path: link.getAttribute("xh-route"),
+            template: link.getAttribute("xh-template"),
+            api: link.getAttribute("xh-get"),
+            element: link,
+            regex: null,
+            paramNames: []
+          };
+
+          // Convert path pattern to regex: /users/:id -> /users/([^/]+)
+          var paramNames = [];
+          var regexStr = route.path.replace(/:([^/]+)/g, function(_, name) {
+            paramNames.push(name);
+            return "([^/]+)";
+          });
+          route.regex = new RegExp("^" + regexStr + "$");
+          route.paramNames = paramNames;
+          router._routes.push(route);
+
+          // Click handler
+          (function(r) {
+            r.element.addEventListener("click", function(e) {
+              e.preventDefault();
+              router.navigate(r.path);
+            });
+          })(route);
+        }
+
+        // 404 fallback
+        var notFound = containers[c].getAttribute("xh-router-404");
+        if (notFound) router._notFoundTemplate = notFound;
+      }
+
+      // Handle popstate for back/forward
+      window.addEventListener("popstate", function() {
+        router._resolve(window.location.pathname);
+      });
+
+      // Resolve current URL on init
+      if (router._routes.length > 0) {
+        router._resolve(window.location.pathname);
+      }
+    },
+
+    navigate: function(path) {
+      history.pushState({ xhtmlx: true, route: path }, "", path);
+      router._resolve(path);
+    },
+
+    _resolve: function(path) {
+      if (!router._outlet) return;
+
+      for (var i = 0; i < router._routes.length; i++) {
+        var route = router._routes[i];
+        var match = path.match(route.regex);
+        if (match) {
+          // Extract params
+          var params = {};
+          for (var p = 0; p < route.paramNames.length; p++) {
+            params[route.paramNames[p]] = match[p + 1];
+          }
+
+          // Update active class
+          if (router._activeLink) {
+            router._activeLink.classList.remove(router._activeClass);
+          }
+          route.element.classList.add(router._activeClass);
+          router._activeLink = route.element;
+
+          // Fetch data and render
+          var ctx = new DataContext(params);
+
+          if (route.api) {
+            var url = interpolate(route.api, ctx, true);
+            fetch(url).then(function(r) { return r.text(); }).then(function(text) {
+              var data;
+              try { data = JSON.parse(text); } catch(e) { data = {}; }
+              var childCtx = new DataContext(data, ctx);
+
+              if (route.template) {
+                fetchTemplate(route.template).then(function(html) {
+                  var fragment = renderTemplate(html, childCtx);
+                  router._outlet.innerHTML = "";
+                  router._outlet.appendChild(fragment);
+                  processNode(router._outlet, childCtx, []);
+                });
+              }
+            });
+          } else if (route.template) {
+            fetchTemplate(route.template).then(function(html) {
+              var fragment = renderTemplate(html, ctx);
+              router._outlet.innerHTML = "";
+              router._outlet.appendChild(fragment);
+              processNode(router._outlet, ctx, []);
+            });
+          }
+
+          emitEvent(router._outlet, "xh:routeChanged", { path: path, params: params }, false);
+          return;
+        }
+      }
+
+      // 404
+      if (router._notFoundTemplate) {
+        var ctx404 = new DataContext({ path: path });
+        fetchTemplate(router._notFoundTemplate).then(function(html) {
+          var fragment = renderTemplate(html, ctx404);
+          router._outlet.innerHTML = "";
+          router._outlet.appendChild(fragment);
+        });
+      }
+
+      emitEvent(document.body, "xh:routeNotFound", { path: path }, false);
+    }
+  };
 
   // ---------------------------------------------------------------------------
   // Public API
@@ -2344,6 +2710,12 @@
       }
     },
 
+    /** i18n module for internationalization support */
+    i18n: i18n,
+
+    /** SPA Router */
+    router: router,
+
     /** Internal version string */
     version: "0.2.0",
 
@@ -2389,7 +2761,11 @@
       registerDirective: registerDirective,
       registerHook: registerHook,
       registerTransform: registerTransform,
-      config: config
+      config: config,
+      validateElement: validateElement,
+      applyI18n: applyI18n,
+      i18n: i18n,
+      router: router
     }
   };
 
@@ -2411,6 +2787,7 @@
       var rootCtx = new DataContext({});
       processNode(document.body, rootCtx, []);
       setupMutationObserver(rootCtx);
+      router._init();
     });
   }
 
