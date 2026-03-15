@@ -22,7 +22,10 @@
     errorClass: "xh-error",
     batchThreshold: 100, // xh-each arrays above this size use rAF batching
     defaultErrorTemplate: null, // Global fallback error template URL
-    defaultErrorTarget: null    // Global fallback error target CSS selector
+    defaultErrorTarget: null,   // Global fallback error target CSS selector
+    templatePrefix: "",         // Prefix prepended to all xh-template URLs
+    apiPrefix: "",              // Prefix prepended to all REST verb URLs
+    uiVersion: null             // Current UI version identifier (any string)
   };
 
   // ---------------------------------------------------------------------------
@@ -289,12 +292,15 @@
    * @returns {Promise<string>}
    */
   function fetchTemplate(url) {
-    if (templateCache.has(url)) return templateCache.get(url);
-    var promise = fetch(url).then(function (res) {
-      if (!res.ok) throw new Error("Template fetch failed: " + url + " (" + res.status + ")");
+    // Prepend template prefix (for UI versioning)
+    var fetchUrl = config.templatePrefix ? config.templatePrefix + url : url;
+    // Cache by prefixed URL so version switches get fresh templates
+    if (templateCache.has(fetchUrl)) return templateCache.get(fetchUrl);
+    var promise = fetch(fetchUrl).then(function (res) {
+      if (!res.ok) throw new Error("Template fetch failed: " + fetchUrl + " (" + res.status + ")");
       return res.text();
     });
-    templateCache.set(url, promise);
+    templateCache.set(fetchUrl, promise);
     return promise;
   }
 
@@ -1274,8 +1280,11 @@
     // Mark request in-flight
     if (state) state.requestInFlight = true;
 
-    // Interpolate URL with URI encoding
+    // Interpolate URL with URI encoding, prepend API prefix for versioning
     var url = interpolate(restInfo.url, ctx, true);
+    if (config.apiPrefix && url.indexOf("://") === -1) {
+      url = config.apiPrefix + url;
+    }
 
     // Build fetch options
     var fetchOpts = { method: restInfo.verb, headers: {} };
@@ -1472,8 +1481,13 @@
             history.replaceState({ xhtmlx: true }, "", rUrl);
           }
 
-          // Store data context on element
-          if (state) state.dataContext = childCtx;
+          // Store data context and URLs for reload/versioning
+          if (state) {
+            state.dataContext = childCtx;
+            state.templateUrl = el.getAttribute("xh-template");
+            state.apiUrl = restInfo.url;
+            state.apiVerb = restInfo.verb;
+          }
         });
       });
     }
@@ -2273,8 +2287,65 @@
     /** Register a named transform for pipe syntax in bindings. */
     transform: registerTransform,
 
+    /**
+     * Switch UI version. Sets template and API prefixes, clears all caches.
+     * Version can be any string: "v2", "abc123", "20260315", a git SHA, etc.
+     *
+     * @param {string}  version     – Version identifier.
+     * @param {Object}  [opts]      – Options.
+     * @param {string}  [opts.templatePrefix] – Template prefix. Defaults to "/ui/{version}".
+     * @param {string}  [opts.apiPrefix]      – API prefix. Defaults to "" (unchanged).
+     * @param {boolean} [opts.reload]         – Re-render all active widgets. Defaults to true.
+     */
+    switchVersion: function (version, opts) {
+      opts = opts || {};
+      config.uiVersion = version;
+      config.templatePrefix = opts.templatePrefix != null ? opts.templatePrefix : "/ui/" + version;
+      config.apiPrefix = opts.apiPrefix != null ? opts.apiPrefix : config.apiPrefix;
+      templateCache.clear();
+      responseCache.clear();
+
+      if (typeof document !== "undefined") {
+        emitEvent(document.body, "xh:versionChanged", {
+          version: version,
+          templatePrefix: config.templatePrefix,
+          apiPrefix: config.apiPrefix
+        }, false);
+      }
+
+      if (opts.reload !== false) {
+        this.reload();
+      }
+    },
+
+    /**
+     * Re-render all active widgets, or only those using a specific template.
+     * Re-fetches data from API and re-renders with (possibly new) templates.
+     *
+     * @param {string} [templateUrl] – If provided, only reload widgets using this template.
+     */
+    reload: function (templateUrl) {
+      if (typeof document === "undefined") return;
+      var allEls = gatherXhElements(document.body);
+      for (var i = 0; i < allEls.length; i++) {
+        var el = allEls[i];
+        var st = elementStates.get(el);
+        if (!st || !st.apiUrl) continue;
+        if (templateUrl && st.templateUrl !== templateUrl) continue;
+        // Reset processed flag so element can be re-triggered
+        st.processed = false;
+        elementStates.set(el, st);
+        // Re-execute the request
+        var restInfo = getRestVerb(el);
+        if (restInfo) {
+          var ctx = st.dataContext || new DataContext({});
+          executeRequest(el, ctx, []);
+        }
+      }
+    },
+
     /** Internal version string */
-    version: "0.1.0",
+    version: "0.2.0",
 
     // --- Internals exposed for testing (not part of the public API) ----------
     _internals: {
