@@ -1,5 +1,6 @@
 node_modules/
 coverage/
 xhtmlx.min.js
+xhtmlx.min.js.map
 *.tgz
 .DS_Store

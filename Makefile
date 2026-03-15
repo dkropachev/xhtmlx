@@ -66,9 +66,10 @@ examples: ## Start example server on port 3000
 build: check lint test-all ## Full build: syntax check + lint + all tests
 	@echo "Build passed"
 
-minify: ## Create minified version (requires terser)
-	npx terser xhtmlx.js -o xhtmlx.min.js --compress --mangle
-	@echo "Minified: xhtmlx.min.js ($$(wc -c < xhtmlx.min.js) bytes)"
+minify: ## Create minified version with source map
+	npx terser xhtmlx.js -o xhtmlx.min.js --compress --mangle --source-map "filename='xhtmlx.min.js.map',url='xhtmlx.min.js.map'"
+	@echo "Minified: xhtmlx.min.js ($$(wc -c < xhtmlx.min.js) bytes, $$(gzip -c xhtmlx.min.js | wc -c) gzipped)"
+	@echo "Source map: xhtmlx.min.js.map ($$(wc -c < xhtmlx.min.js.map) bytes)"
 
 # ---------------------------------------------------------------------------
 # CI/CD
@@ -82,4 +83,4 @@ ci: install check lint test-all ## Full CI pipeline: install, check, lint, test
 # ---------------------------------------------------------------------------
 
 clean: ## Remove generated files and node_modules
-	rm -rf node_modules coverage xhtmlx.min.js
+	rm -rf node_modules coverage xhtmlx.min.js xhtmlx.min.js.map

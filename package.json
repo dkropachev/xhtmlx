@@ -9,6 +9,7 @@
   "files": [
     "xhtmlx.js",
     "xhtmlx.min.js",
+    "xhtmlx.min.js.map",
     "README.md",
     "LICENSE"
   ],
@@ -18,7 +19,7 @@
     "test:integration": "jest tests/integration --verbose",
     "lint": "eslint xhtmlx.js tests/ --ext .js",
     "check": "node --check xhtmlx.js",
-    "build": "npx terser xhtmlx.js -o xhtmlx.min.js --compress --mangle",
+    "build": "npx terser xhtmlx.js -o xhtmlx.min.js --compress --mangle --source-map \"filename='xhtmlx.min.js.map',url='xhtmlx.min.js.map'\"",
     "prepublishOnly": "npm run check && npm run lint && npm test && npm run build",
     "examples": "node examples/server.js"
   },
