@@ -41,6 +41,9 @@
   /** Generation counter per element for discarding stale responses */
   var generationMap = new WeakMap();
 
+  /** Map<string, {data: string, timestamp: number}> — response cache (verb:url → body) */
+  var responseCache = new Map();
+
   // ---------------------------------------------------------------------------
   // Default CSS injection
   // ---------------------------------------------------------------------------
@@ -51,7 +54,9 @@
     style.id = id;
     style.textContent =
       ".xh-indicator { opacity: 0; transition: opacity 200ms ease-in; }\n" +
-      ".xh-request .xh-indicator, .xh-request.xh-indicator { opacity: 1; }\n";
+      ".xh-request .xh-indicator, .xh-request.xh-indicator { opacity: 1; }\n" +
+      ".xh-added { }\n" +
+      ".xh-settled { }\n";
     document.head.appendChild(style);
   }
 
@@ -88,6 +93,19 @@
    */
   DataContext.prototype.resolve = function (path) {
     if (path == null || path === "") return undefined;
+
+    // -- transform pipe support: "price | currency" --------------------------
+    if (path.indexOf(" | ") !== -1) {
+      var pipeParts = path.split(" | ");
+      var rawValue = this.resolve(pipeParts[0].trim());
+      for (var p = 1; p < pipeParts.length; p++) {
+        var transformName = pipeParts[p].trim();
+        if (transforms[transformName]) {
+          rawValue = transforms[transformName](rawValue);
+        }
+      }
+      return rawValue;
+    }
 
     var parts = path.split(".");
 
@@ -524,6 +542,15 @@
             });
           })(attrs[c].value, className, el, ctx);
         }
+      }
+    }
+
+    // -- custom directives -------------------------------------------------------
+    for (var cd = 0; cd < customDirectives.length; cd++) {
+      var directive = customDirectives[cd];
+      var cdVal = el.getAttribute(directive.name);
+      if (cdVal != null) {
+        directive.handler(el, cdVal, ctx);
       }
     }
 
@@ -998,6 +1025,10 @@
         state.observers[k].disconnect();
       }
     }
+    if (state.ws) {
+      state.ws.close(1000);
+      state.ws = null;
+    }
   }
 
   /**
@@ -1144,6 +1175,77 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Settle class helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Apply settle classes to newly inserted elements.
+   * Adds "xh-added" immediately, then swaps to "xh-settled" after two
+   * animation frames so that CSS transitions can react.
+   *
+   * @param {Element} processTarget – The container of new elements.
+   */
+  function applySettleClasses(processTarget) {
+    if (!processTarget) return;
+    var newEls = processTarget.querySelectorAll ? Array.prototype.slice.call(processTarget.querySelectorAll("*")) : [];
+    if (processTarget.classList) newEls.unshift(processTarget);
+
+    for (var se = 0; se < newEls.length; se++) {
+      if (newEls[se].classList) newEls[se].classList.add("xh-added");
+    }
+
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        for (var sf = 0; sf < newEls.length; sf++) {
+          if (newEls[sf].classList) {
+            newEls[sf].classList.remove("xh-added");
+            newEls[sf].classList.add("xh-settled");
+          }
+        }
+      });
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Retry with backoff helper
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Fetch with automatic retry on 5xx errors and network failures.
+   *
+   * @param {string}  url       – Request URL.
+   * @param {Object}  opts      – Fetch options.
+   * @param {number}  retries   – Maximum number of retries.
+   * @param {number}  delay     – Base delay in ms (doubled each attempt).
+   * @param {number}  attempt   – Current attempt (0-based).
+   * @param {Element} el        – Element for emitting events.
+   * @returns {Promise<Response>}
+   */
+  function fetchWithRetry(url, opts, retries, delay, attempt, el) {
+    return fetch(url, opts).then(function (response) {
+      if (!response.ok && response.status >= 500 && attempt < retries) {
+        emitEvent(el, "xh:retry", { attempt: attempt + 1, maxRetries: retries, status: response.status }, false);
+        return new Promise(function (resolve) {
+          setTimeout(function () {
+            resolve(fetchWithRetry(url, opts, retries, delay, attempt + 1, el));
+          }, delay * Math.pow(2, attempt));
+        });
+      }
+      return response;
+    }).catch(function (err) {
+      if (attempt < retries) {
+        emitEvent(el, "xh:retry", { attempt: attempt + 1, maxRetries: retries, error: err.message }, false);
+        return new Promise(function (resolve) {
+          setTimeout(function () {
+            resolve(fetchWithRetry(url, opts, retries, delay, attempt + 1, el));
+          }, delay * Math.pow(2, attempt));
+        });
+      }
+      throw err;
+    });
+  }
+
+  // ---------------------------------------------------------------------------
   // Main request handler
   // ---------------------------------------------------------------------------
 
@@ -1192,6 +1294,15 @@
       fetchOpts.body = buildRequestBody(el, ctx);
     }
 
+    // Run global plugin hooks before request
+    var hookAllowed = runHooks("beforeRequest", {
+      url: url, method: restInfo.verb, headers: fetchOpts.headers, element: el
+    });
+    if (!hookAllowed) {
+      if (state) state.requestInFlight = false;
+      return;
+    }
+
     // Emit xh:beforeRequest (cancelable)
     var allowed = emitEvent(el, "xh:beforeRequest", {
       url: url,
@@ -1210,90 +1321,40 @@
     var disabledClass = el.getAttribute("xh-disabled-class");
     if (disabledClass) el.classList.add(disabledClass);
 
-    fetch(url, fetchOpts)
-      .then(function (response) {
-        // Emit xh:afterRequest
-        emitEvent(el, "xh:afterRequest", { url: url, status: response.status }, false);
+    // -- Response caching (xh-cache) ------------------------------------------
+    var cacheAttr = el.getAttribute("xh-cache");
+    var cacheKey = restInfo.verb + ":" + url;
 
-        // Stale response check
-        if (generationMap.get(el) !== gen) {
-          if (config.debug) console.warn("[xhtmlx] discarding stale response for", url);
+    if (cacheAttr && restInfo.verb === "GET") {
+      var cached = responseCache.get(cacheKey);
+      if (cached) {
+        var age = Date.now() - cached.timestamp;
+        var ttl = cacheAttr === "forever" ? Infinity : parseInt(cacheAttr, 10) * 1000;
+        if (age < ttl) {
+          // Use cached response — create a fake Response-like object
+          var fakeResponse = {
+            ok: true, status: 200, statusText: "OK (cached)",
+            text: function () { return Promise.resolve(cached.data); }
+          };
+          processFetchResponse(fakeResponse);
           return;
         }
+        responseCache.delete(cacheKey);
+      }
+    }
 
-        if (!response.ok) {
-          // Error path
-          return response.text().then(function (bodyText) {
-            var errorBody;
-            try {
-              errorBody = JSON.parse(bodyText);
-            } catch (_) {
-              errorBody = bodyText;
-            }
-            handleError(el, ctx, response.status, response.statusText, errorBody, templateStack);
-          });
-        }
+    // -- Retry with backoff (xh-retry) ----------------------------------------
+    var retryAttr = el.getAttribute("xh-retry");
+    var retryCount = retryAttr ? parseInt(retryAttr, 10) : 0;
+    var retryDelayAttr = el.getAttribute("xh-retry-delay");
+    var retryDelay = retryDelayAttr ? parseInt(retryDelayAttr, 10) : 1000;
 
-        // Success path — parse JSON
-        return response.text().then(function (bodyText) {
-          var jsonData;
-          if (bodyText.trim() === "") {
-            jsonData = {};
-          } else {
-            try {
-              jsonData = JSON.parse(bodyText);
-            } catch (e) {
-              console.error("[xhtmlx] invalid JSON response from", url, e);
-              handleError(el, ctx, response.status, "Invalid JSON", bodyText, templateStack);
-              return;
-            }
-          }
+    var fetchPromise = retryCount > 0
+      ? fetchWithRetry(url, fetchOpts, retryCount, retryDelay, 0, el)
+      : fetch(url, fetchOpts);
 
-          var childCtx = new MutableDataContext(jsonData, ctx);
-
-          // Resolve and render template
-          return resolveTemplate(el, templateStack).then(function (tmpl) {
-            var swapMode = el.getAttribute("xh-swap") || config.defaultSwapMode;
-            var target = getSwapTarget(el, false);
-
-            if (tmpl.html !== null) {
-              // Render from template HTML
-              var fragment = renderTemplate(tmpl.html, childCtx);
-
-              // Emit xh:beforeSwap (cancelable)
-              var swapAllowed = emitEvent(el, "xh:beforeSwap", {
-                target: target,
-                fragment: fragment,
-                swapMode: swapMode
-              }, true);
-              if (!swapAllowed) return;
-
-              var processTarget = performSwap(target, fragment, swapMode);
-
-              // Recursively process new content
-              if (processTarget) {
-                processNode(processTarget, childCtx, tmpl.templateStack);
-              }
-
-              // Emit xh:afterSwap
-              emitEvent(el, "xh:afterSwap", { target: target }, false);
-
-            } else {
-              // Self-binding: apply bindings directly to the element
-              applyBindings(el, childCtx);
-
-              // Also process children for bindings
-              processBindingsInTree(el, childCtx);
-
-              // Emit swap events
-              emitEvent(el, "xh:afterSwap", { target: el }, false);
-            }
-
-            // Store data context on element
-            if (state) state.dataContext = childCtx;
-          });
-        });
-      })
+    fetchPromise
+      .then(processFetchResponse)
       .catch(function (err) {
         console.error("[xhtmlx] request failed:", url, err);
         handleError(el, ctx, 0, "Network Error", err.message, templateStack);
@@ -1303,6 +1364,119 @@
         if (disabledClass) el.classList.remove(disabledClass);
         if (state) state.requestInFlight = false;
       });
+
+    function processFetchResponse(response) {
+      // Emit xh:afterRequest
+      emitEvent(el, "xh:afterRequest", { url: url, status: response.status }, false);
+
+      // Stale response check
+      if (generationMap.get(el) !== gen) {
+        if (config.debug) console.warn("[xhtmlx] discarding stale response for", url);
+        return;
+      }
+
+      if (!response.ok) {
+        // Error path
+        return response.text().then(function (bodyText) {
+          var errorBody;
+          try {
+            errorBody = JSON.parse(bodyText);
+          } catch (_) {
+            errorBody = bodyText;
+          }
+          handleError(el, ctx, response.status, response.statusText, errorBody, templateStack);
+        });
+      }
+
+      // Success path — parse JSON
+      return response.text().then(function (bodyText) {
+        var jsonData;
+        if (bodyText.trim() === "") {
+          jsonData = {};
+        } else {
+          try {
+            jsonData = JSON.parse(bodyText);
+          } catch (e) {
+            console.error("[xhtmlx] invalid JSON response from", url, e);
+            handleError(el, ctx, response.status, "Invalid JSON", bodyText, templateStack);
+            return;
+          }
+        }
+
+        // Cache the response if xh-cache is set
+        if (cacheAttr && restInfo.verb === "GET" && bodyText) {
+          responseCache.set(cacheKey, { data: bodyText, timestamp: Date.now() });
+        }
+
+        var childCtx = new MutableDataContext(jsonData, ctx);
+
+        // Resolve and render template
+        return resolveTemplate(el, templateStack).then(function (tmpl) {
+          var swapMode = el.getAttribute("xh-swap") || config.defaultSwapMode;
+          var target = getSwapTarget(el, false);
+
+          if (tmpl.html !== null) {
+            // Render from template HTML
+            var fragment = renderTemplate(tmpl.html, childCtx);
+
+            // Emit xh:beforeSwap (cancelable)
+            var swapAllowed = emitEvent(el, "xh:beforeSwap", {
+              target: target,
+              fragment: fragment,
+              swapMode: swapMode
+            }, true);
+            if (!swapAllowed) return;
+
+            var processTarget = performSwap(target, fragment, swapMode);
+
+            // Apply settle classes to newly added elements
+            applySettleClasses(processTarget);
+
+            // Recursively process new content
+            if (processTarget) {
+              processNode(processTarget, childCtx, tmpl.templateStack);
+            }
+
+            // Emit xh:afterSwap
+            emitEvent(el, "xh:afterSwap", { target: target }, false);
+
+          } else {
+            // Self-binding: apply bindings directly to the element
+            applyBindings(el, childCtx);
+
+            // Also process children for bindings
+            processBindingsInTree(el, childCtx);
+
+            // Emit swap events
+            emitEvent(el, "xh:afterSwap", { target: el }, false);
+          }
+
+          // -- xh-push-url -------------------------------------------------------
+          var pushUrl = el.getAttribute("xh-push-url");
+          if (pushUrl) {
+            var historyUrl = pushUrl === "true" ? url : interpolate(pushUrl, childCtx, false);
+            var historyState = {
+              xhtmlx: true,
+              url: restInfo.url,
+              verb: restInfo.verb,
+              targetSel: el.getAttribute("xh-target"),
+              templateUrl: el.getAttribute("xh-template")
+            };
+            history.pushState(historyState, "", historyUrl);
+          }
+
+          // -- xh-replace-url ----------------------------------------------------
+          var replaceUrl = el.getAttribute("xh-replace-url");
+          if (replaceUrl) {
+            var rUrl = replaceUrl === "true" ? url : interpolate(replaceUrl, childCtx, false);
+            history.replaceState({ xhtmlx: true }, "", rUrl);
+          }
+
+          // Store data context on element
+          if (state) state.dataContext = childCtx;
+        });
+      });
+    }
   }
 
   /**
@@ -1347,6 +1521,10 @@
         if (!swapAllowed) return;
 
         var processTarget = performSwap(errorTarget, fragment, swapMode);
+
+        // Apply settle classes to newly added error elements
+        applySettleClasses(processTarget);
+
         if (processTarget) {
           processNode(processTarget, errorCtx, templateStack);
         }
@@ -1508,6 +1686,254 @@
   }
 
   // ---------------------------------------------------------------------------
+  // WebSocket support
+  // ---------------------------------------------------------------------------
+
+  function setupWebSocket(el, ctx, templateStack) {
+    var wsUrl = el.getAttribute("xh-ws");
+    if (!wsUrl) return;
+
+    var ws;
+    try {
+      ws = new WebSocket(wsUrl);
+    } catch (e) {
+      console.error("[xhtmlx] WebSocket connection failed:", wsUrl, e);
+      return;
+    }
+
+    var state = elementStates.get(el) || {};
+    state.ws = ws;
+    elementStates.set(el, state);
+
+    ws.addEventListener("message", function(event) {
+      var jsonData;
+      try {
+        jsonData = JSON.parse(event.data);
+      } catch (e) {
+        if (config.debug) console.warn("[xhtmlx] WebSocket message is not JSON:", event.data);
+        return;
+      }
+
+      var childCtx = new DataContext(jsonData, ctx);
+
+      resolveTemplate(el, templateStack).then(function(tmpl) {
+        if (tmpl.html !== null) {
+          var swapMode = el.getAttribute("xh-swap") || config.defaultSwapMode;
+          var target = getSwapTarget(el, false);
+          var fragment = renderTemplate(tmpl.html, childCtx);
+
+          var swapAllowed = emitEvent(el, "xh:beforeSwap", {
+            target: target, fragment: fragment, swapMode: swapMode
+          }, true);
+          if (!swapAllowed) return;
+
+          var processTarget = performSwap(target, fragment, swapMode);
+          if (processTarget) {
+            processNode(processTarget, childCtx, tmpl.templateStack);
+          }
+          emitEvent(el, "xh:afterSwap", { target: target }, false);
+        } else {
+          applyBindings(el, childCtx);
+          processBindingsInTree(el, childCtx);
+        }
+      });
+    });
+
+    ws.addEventListener("open", function() {
+      emitEvent(el, "xh:wsOpen", { url: wsUrl }, false);
+    });
+
+    ws.addEventListener("close", function(event) {
+      emitEvent(el, "xh:wsClose", { code: event.code, reason: event.reason }, false);
+      // Auto-reconnect after 3 seconds if not deliberately closed
+      if (event.code !== 1000) {
+        setTimeout(function() {
+          if (el.parentNode) setupWebSocket(el, ctx, templateStack);
+        }, 3000);
+      }
+    });
+
+    ws.addEventListener("error", function() {
+      emitEvent(el, "xh:wsError", { url: wsUrl }, false);
+    });
+  }
+
+  // For sending messages
+  function setupWsSend(el) {
+    var sendTarget = el.getAttribute("xh-ws-send");
+    if (!sendTarget) return;
+
+    el.addEventListener(el.tagName.toLowerCase() === "form" ? "submit" : "click", function(evt) {
+      evt.preventDefault();
+      var wsEl = document.querySelector(sendTarget);
+      if (!wsEl) return;
+      var wsState = elementStates.get(wsEl);
+      if (!wsState || !wsState.ws || wsState.ws.readyState !== 1) return;
+
+      var data = {};
+      var form = el.tagName.toLowerCase() === "form" ? el : el.closest("form");
+      if (form) {
+        new FormData(form).forEach(function(v, k) { data[k] = v; });
+      }
+      var vals = el.getAttribute("xh-vals");
+      if (vals) {
+        try {
+          var parsed = JSON.parse(vals);
+          for (var k in parsed) {
+            if (parsed.hasOwnProperty(k)) data[k] = parsed[k];
+          }
+        } catch(e) {
+          // ignore invalid JSON
+        }
+      }
+      wsState.ws.send(JSON.stringify(data));
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // xh-boost — enhance regular links and forms
+  // ---------------------------------------------------------------------------
+
+  function boostElement(container, ctx) {
+    // Boost links
+    var links = container.querySelectorAll("a[href]");
+    for (var i = 0; i < links.length; i++) {
+      if (links[i].hasAttribute("xh-get") || links[i].hasAttribute("data-xh-boosted")) continue;
+      boostLink(links[i], ctx);
+    }
+
+    // Boost forms
+    var forms = container.querySelectorAll("form[action]");
+    for (var j = 0; j < forms.length; j++) {
+      if (getRestVerb(forms[j]) || forms[j].hasAttribute("data-xh-boosted")) continue;
+      boostForm(forms[j], ctx);
+    }
+  }
+
+  function boostLink(link, ctx) {
+    var href = link.getAttribute("href");
+    if (!href || href.indexOf("#") === 0 || href.indexOf("javascript:") === 0 || href.indexOf("mailto:") === 0 || link.getAttribute("target") === "_blank") return;
+
+    link.setAttribute("data-xh-boosted", "");
+    link.addEventListener("click", function(e) {
+      e.preventDefault();
+      var boostContainer = link.closest("[xh-boost]");
+      var boostTarget = boostContainer.getAttribute("xh-boost-target") || "#xh-boost-content";
+      var target = document.querySelector(boostTarget);
+      if (!target) target = document.body;
+
+      showIndicator(boostContainer);
+
+      fetch(href).then(function(response) {
+        return response.text();
+      }).then(function(text) {
+        var jsonData;
+        try {
+          jsonData = JSON.parse(text);
+        } catch(e) {
+          // If not JSON, treat as HTML and swap directly
+          target.innerHTML = text;
+          processNode(target, ctx, []);
+          return;
+        }
+        var childCtx = new DataContext(jsonData, ctx);
+        var templateUrl = boostContainer.getAttribute("xh-boost-template");
+        if (templateUrl) {
+          fetchTemplate(templateUrl).then(function(html) {
+            var fragment = renderTemplate(html, childCtx);
+            target.innerHTML = "";
+            target.appendChild(fragment);
+            processNode(target, childCtx, []);
+          });
+        } else {
+          // Self-bind
+          applyBindings(target, childCtx);
+          processBindingsInTree(target, childCtx);
+        }
+      }).finally(function() {
+        hideIndicator(boostContainer);
+      });
+
+      // Push URL
+      if (typeof history !== "undefined" && history.pushState) {
+        history.pushState({ xhtmlx: true, url: href }, "", href);
+      }
+    });
+  }
+
+  function boostForm(form, ctx) {
+    var action = form.getAttribute("action");
+    var method = (form.getAttribute("method") || "GET").toUpperCase();
+    if (!action) return;
+
+    form.setAttribute("data-xh-boosted", "");
+    form.addEventListener("submit", function(e) {
+      e.preventDefault();
+      var body = {};
+      new FormData(form).forEach(function(v, k) { body[k] = v; });
+
+      var fetchOpts = { method: method, headers: {} };
+      if (method !== "GET") {
+        fetchOpts.headers["Content-Type"] = "application/json";
+        fetchOpts.body = JSON.stringify(body);
+      }
+
+      var boostContainer = form.closest("[xh-boost]");
+      var boostTarget = boostContainer.getAttribute("xh-boost-target") || "#xh-boost-content";
+      var target = document.querySelector(boostTarget);
+      if (!target) target = form;
+
+      fetch(action, fetchOpts).then(function(response) {
+        return response.text();
+      }).then(function(text) {
+        var jsonData;
+        try { jsonData = JSON.parse(text); } catch(e) { return; }
+        var childCtx = new DataContext(jsonData, ctx);
+        var templateUrl = boostContainer.getAttribute("xh-boost-template");
+        if (templateUrl) {
+          fetchTemplate(templateUrl).then(function(html) {
+            var fragment = renderTemplate(html, childCtx);
+            target.innerHTML = "";
+            target.appendChild(fragment);
+            processNode(target, childCtx, []);
+          });
+        }
+      });
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Plugin / Extension API
+  // ---------------------------------------------------------------------------
+
+  var customDirectives = []; // [{name, handler}]
+  var globalHooks = {};      // event -> [handler]
+  var transforms = {};       // name -> function
+
+  function registerDirective(name, handler) {
+    customDirectives.push({ name: name, handler: handler });
+  }
+
+  function registerHook(event, handler) {
+    if (!globalHooks[event]) globalHooks[event] = [];
+    globalHooks[event].push(handler);
+  }
+
+  function registerTransform(name, fn) {
+    transforms[name] = fn;
+  }
+
+  function runHooks(event, detail) {
+    var hooks = globalHooks[event];
+    if (!hooks) return true;
+    for (var i = 0; i < hooks.length; i++) {
+      var result = hooks[i](detail);
+      if (result === false) return false;
+    }
+    return true;
+  }
+
+  // ---------------------------------------------------------------------------
   // Core processing loop
   // ---------------------------------------------------------------------------
 
@@ -1558,7 +1984,12 @@
       "[xh-indicator]", "[xh-vals]", "[xh-headers]",
       "[xh-error-template]", "[xh-error-target]",
       "[xh-model]", "[xh-show]", "[xh-hide]",
-      "[xh-disabled-class]"
+      "[xh-disabled-class]",
+      "[xh-push-url]", "[xh-replace-url]",
+      "[xh-cache]",
+      "[xh-retry]",
+      "[xh-ws]", "[xh-ws-send]",
+      "[xh-boost]"
     ];
 
     // Also match xh-attr-* and xh-error-template-*
@@ -1669,6 +2100,23 @@
     }
     for (var ob = 0; ob < onAttrs.length; ob++) {
       attachOnHandler(el, onAttrs[ob].event, onAttrs[ob].action);
+    }
+
+    if (el.hasAttribute("xh-ws")) {
+      setupWebSocket(el, ctx, templateStack);
+      var wState = elementStates.get(el) || {};
+      wState.processed = true;
+      elementStates.set(el, wState);
+    }
+    if (el.hasAttribute("xh-ws-send")) {
+      setupWsSend(el);
+    }
+
+    if (el.hasAttribute("xh-boost")) {
+      boostElement(el, ctx);
+      var boostState = elementStates.get(el) || {};
+      boostState.processed = true;
+      elementStates.set(el, boostState);
     }
 
     var restInfo = getRestVerb(el);
@@ -1799,6 +2247,13 @@
     },
 
     /**
+     * Clear the response cache.
+     */
+    clearResponseCache: function () {
+      responseCache.clear();
+    },
+
+    /**
      * Interpolate a string using a data context.
      * @param {string}      str
      * @param {DataContext}  ctx
@@ -1808,6 +2263,15 @@
     interpolate: function (str, ctx, uriEncode) {
       return interpolate(str, ctx, !!uriEncode);
     },
+
+    /** Register a custom directive processed in applyBindings. */
+    directive: registerDirective,
+
+    /** Register a global hook (e.g. "beforeRequest"). */
+    hook: registerHook,
+
+    /** Register a named transform for pipe syntax in bindings. */
+    transform: registerTransform,
 
     /** Internal version string */
     version: "0.1.0",
@@ -1837,8 +2301,23 @@
       defaultTrigger: defaultTrigger,
       resolveDot: resolveDot,
       templateCache: templateCache,
+      responseCache: responseCache,
       elementStates: elementStates,
       generationMap: generationMap,
+      fetchWithRetry: fetchWithRetry,
+      applySettleClasses: applySettleClasses,
+      setupWebSocket: setupWebSocket,
+      setupWsSend: setupWsSend,
+      boostElement: boostElement,
+      boostLink: boostLink,
+      boostForm: boostForm,
+      customDirectives: customDirectives,
+      globalHooks: globalHooks,
+      transforms: transforms,
+      runHooks: runHooks,
+      registerDirective: registerDirective,
+      registerHook: registerHook,
+      registerTransform: registerTransform,
       config: config
     }
   };
@@ -1861,6 +2340,37 @@
       var rootCtx = new DataContext({});
       processNode(document.body, rootCtx, []);
       setupMutationObserver(rootCtx);
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // popstate listener — browser history back/forward (xh-push-url support)
+  // ---------------------------------------------------------------------------
+
+  if (typeof window !== "undefined") {
+    window.addEventListener("popstate", function (e) {
+      if (e.state && e.state.xhtmlx && e.state.url) {
+        var target = e.state.targetSel ? document.querySelector(e.state.targetSel) : document.body;
+        if (target) {
+          fetch(e.state.url).then(function (r) { return r.text(); }).then(function (text) {
+            var data;
+            try {
+              data = JSON.parse(text);
+            } catch (_) {
+              return;
+            }
+            var ctx = new DataContext(data);
+            if (e.state.templateUrl) {
+              fetchTemplate(e.state.templateUrl).then(function (html) {
+                var fragment = renderTemplate(html, ctx);
+                target.innerHTML = "";
+                target.appendChild(fragment);
+                processNode(target, ctx, []);
+              });
+            }
+          }).catch(function () {});
+        }
+      }
     });
   }
 
