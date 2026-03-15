@@ -937,6 +937,11 @@ img { max-width: 100%; }
   .footer-brand { flex-direction: column; }
 }
 
+/* ========== Utility ========== */
+@media (max-width: 600px) {
+  .hide-mobile { display: none; }
+}
+
 /* ========== Scrollbar ========== */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -947,6 +952,266 @@ img { max-width: 100%; }
 ::selection {
   background: rgba(99,102,241,0.3);
   color: #fff;
+}
+
+/* ========== REST API Showcase ========== */
+.rest-showcase { background: var(--bg-primary); }
+
+.rest-tabs {
+  display: flex;
+  gap: 0;
+  border-radius: 12px 12px 0 0;
+  overflow: hidden;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-bottom: none;
+}
+.rest-tab {
+  flex: 1;
+  padding: 16px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.25s;
+  position: relative;
+  text-align: center;
+}
+.rest-tab:hover { color: var(--text-primary); background: rgba(99,102,241,0.06); }
+.rest-tab.active { color: var(--text-primary); background: var(--bg-card); }
+.rest-tab.active::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+}
+.rest-tab[data-verb="GET"].active::after { background: #22d3ee; }
+.rest-tab[data-verb="POST"].active::after { background: #4ade80; }
+.rest-tab[data-verb="PUT"].active::after { background: #f59e0b; }
+.rest-tab[data-verb="DELETE"].active::after { background: #ef4444; }
+.rest-tab[data-verb="PATCH"].active::after { background: #a78bfa; }
+
+.rest-tab .verb-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.rest-tab[data-verb="GET"] .verb-badge { background: rgba(34,211,238,0.15); color: #22d3ee; }
+.rest-tab[data-verb="POST"] .verb-badge { background: rgba(74,222,128,0.15); color: #4ade80; }
+.rest-tab[data-verb="PUT"] .verb-badge { background: rgba(245,158,11,0.15); color: #f59e0b; }
+.rest-tab[data-verb="DELETE"] .verb-badge { background: rgba(239,68,68,0.15); color: #ef4444; }
+.rest-tab[data-verb="PATCH"] .verb-badge { background: rgba(167,139,250,0.15); color: #a78bfa; }
+
+.rest-panel-container {
+  border: 1px solid var(--border-color);
+  border-radius: 0 0 12px 12px;
+  background: var(--bg-card);
+  overflow: hidden;
+}
+.rest-panel { display: none; }
+.rest-panel.active { display: block; }
+
+.rest-flow {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0;
+}
+@media (min-width: 900px) {
+  .rest-flow {
+    grid-template-columns: 1fr auto 1fr auto 1fr;
+    align-items: stretch;
+  }
+}
+
+.rest-flow-col {
+  padding: 24px;
+}
+.rest-flow-col-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.rest-flow-col-header .col-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+}
+
+.col-html .col-icon { background: rgba(99,102,241,0.15); color: var(--accent-1); }
+.col-html .rest-flow-col-header { color: var(--accent-1); }
+
+.col-request .col-icon { background: rgba(245,158,11,0.15); color: #f59e0b; }
+.col-request .rest-flow-col-header { color: #f59e0b; }
+
+.col-response .col-icon { background: rgba(74,222,128,0.15); color: #4ade80; }
+.col-response .rest-flow-col-header { color: #4ade80; }
+
+.rest-flow-arrow {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 1.5rem;
+  padding: 0 4px;
+}
+@media (min-width: 900px) {
+  .rest-flow-arrow { display: flex; }
+}
+
+.rest-flow-arrow-mobile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 1.2rem;
+  padding: 8px;
+  transform: rotate(90deg);
+}
+@media (min-width: 900px) {
+  .rest-flow-arrow-mobile { display: none; }
+}
+
+.rest-code {
+  background: var(--bg-code);
+  border-radius: 8px;
+  padding: 16px;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  line-height: 1.6;
+  overflow-x: auto;
+  border: 1px solid rgba(255,255,255,0.04);
+}
+
+.rest-url {
+  background: var(--bg-code);
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  margin-bottom: 12px;
+  border: 1px solid rgba(255,255,255,0.04);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.rest-method {
+  font-weight: 700;
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+.method-get { background: rgba(34,211,238,0.15); color: #22d3ee; }
+.method-post { background: rgba(74,222,128,0.15); color: #4ade80; }
+.method-put { background: rgba(245,158,11,0.15); color: #f59e0b; }
+.method-delete { background: rgba(239,68,68,0.15); color: #ef4444; }
+.method-patch { background: rgba(167,139,250,0.15); color: #a78bfa; }
+
+.rest-status {
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  margin-bottom: 12px;
+  display: inline-block;
+}
+.status-200 { background: rgba(74,222,128,0.15); color: #4ade80; }
+.status-201 { background: rgba(74,222,128,0.15); color: #4ade80; }
+.status-204 { background: rgba(74,222,128,0.15); color: #4ade80; }
+
+.rest-rendered {
+  background: rgba(99,102,241,0.05);
+  border: 1px dashed var(--border-color);
+  border-radius: 8px;
+  padding: 16px;
+  margin-top: 12px;
+}
+.rest-rendered-label {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+.rest-rendered-content {
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  line-height: 1.6;
+}
+.rest-rendered-content .mock-card {
+  background: var(--bg-secondary);
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin: 4px 0;
+  border-left: 3px solid var(--accent-3);
+}
+.rest-rendered-content .mock-card .mock-name { font-weight: 600; color: #e2e8f0; }
+.rest-rendered-content .mock-card .mock-detail { font-size: 0.78rem; color: var(--text-secondary); }
+.rest-rendered-content .mock-badge {
+  display: inline-block;
+  background: rgba(74,222,128,0.15);
+  color: #4ade80;
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 3px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.rest-rendered-content .mock-form {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.rest-rendered-content .mock-input {
+  background: var(--bg-code);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 6px 10px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  flex: 1;
+  min-width: 100px;
+}
+.rest-rendered-content .mock-btn {
+  background: var(--gradient-accent);
+  border: none;
+  border-radius: 4px;
+  padding: 6px 16px;
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: default;
+}
+.rest-rendered-content .mock-success {
+  color: #4ade80;
+  font-weight: 600;
+}
+.rest-rendered-content .mock-deleted {
+  color: var(--text-muted);
+  font-style: italic;
 }
 </style>
 </head>
@@ -961,6 +1226,7 @@ img { max-width: 100%; }
     </button>
     <ul class="nav-links" id="navLinks">
       <li><a href="#how-it-works">How It Works</a></li>
+      <li><a href="#rest-api">REST API</a></li>
       <li><a href="#features">Features</a></li>
       <li><a href="#examples">Examples</a></li>
       <li><a href="#install">Install</a></li>
@@ -1131,6 +1397,240 @@ img { max-width: 100%; }
           3. Server returns <span>JSON data</span><br>
           4. Render template with data<br>
           5. Swap rendered result into DOM
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== REST API Showcase ==================== -->
+<section class="section rest-showcase" id="rest-api">
+  <div class="container">
+    <div class="text-center fade-in">
+      <div class="section-label">REST API</div>
+      <h2 class="section-title">Every HTTP method, one attribute</h2>
+      <p class="section-subtitle mx-auto">
+        Your server stays a clean REST API returning JSON. xhtmlx handles every verb &mdash; from fetching data to creating, updating, and deleting resources.
+      </p>
+    </div>
+
+    <div class="fade-in" style="margin-top: 48px;">
+      <div class="rest-tabs" role="tablist">
+        <button class="rest-tab active" data-verb="GET" data-rtab="rp-get" role="tab"><span class="verb-badge">GET</span><span class="hide-mobile"> Read</span></button>
+        <button class="rest-tab" data-verb="POST" data-rtab="rp-post" role="tab"><span class="verb-badge">POST</span><span class="hide-mobile"> Create</span></button>
+        <button class="rest-tab" data-verb="PUT" data-rtab="rp-put" role="tab"><span class="verb-badge">PUT</span><span class="hide-mobile"> Update</span></button>
+        <button class="rest-tab" data-verb="DELETE" data-rtab="rp-del" role="tab"><span class="verb-badge">DELETE</span><span class="hide-mobile"> Remove</span></button>
+        <button class="rest-tab" data-verb="PATCH" data-rtab="rp-patch" role="tab"><span class="verb-badge">PATCH</span><span class="hide-mobile"> Partial</span></button>
+      </div>
+
+      <div class="rest-panel-container">
+        <!-- GET -->
+        <div class="rest-panel active" id="rp-get">
+          <div class="rest-flow">
+            <div class="rest-flow-col col-html">
+              <div class="rest-flow-col-header"><div class="col-icon">&lt;/&gt;</div> HTML</div>
+              <div class="rest-code"><span class="syn-tag">&lt;div</span> <span class="syn-attr">xh-get</span>=<span class="syn-val">"/api/users"</span>
+     <span class="syn-attr">xh-trigger</span>=<span class="syn-val">"load"</span><span class="syn-tag">&gt;</span>
+  <span class="syn-tag">&lt;template&gt;</span>
+    <span class="syn-tag">&lt;div</span> <span class="syn-attr">xh-each</span>=<span class="syn-val">"users"</span><span class="syn-tag">&gt;</span>
+      <span class="syn-tag">&lt;span</span> <span class="syn-attr">xh-text</span>=<span class="syn-val">"name"</span><span class="syn-tag">&gt;&lt;/span&gt;</span>
+      <span class="syn-tag">&lt;span</span> <span class="syn-attr">xh-text</span>=<span class="syn-val">"email"</span><span class="syn-tag">&gt;&lt;/span&gt;</span>
+    <span class="syn-tag">&lt;/div&gt;</span>
+  <span class="syn-tag">&lt;/template&gt;</span>
+<span class="syn-tag">&lt;/div&gt;</span></div>
+            </div>
+            <div class="rest-flow-arrow">&#8594;</div>
+            <div class="rest-flow-arrow-mobile">&#8594;</div>
+            <div class="rest-flow-col col-request">
+              <div class="rest-flow-col-header"><div class="col-icon">&#9889;</div> Request / Response</div>
+              <div class="rest-url"><span class="rest-method method-get">GET</span> <span style="color:var(--text-secondary)">/api/users</span></div>
+              <div class="rest-status status-200">200 OK</div>
+              <div class="rest-code"><span class="syn-punct">{</span>
+  <span class="syn-key">"users"</span><span class="syn-punct">: [</span>
+    <span class="syn-punct">{</span> <span class="syn-key">"name"</span><span class="syn-punct">:</span> <span class="syn-str">"Alice"</span><span class="syn-punct">,</span> <span class="syn-key">"email"</span><span class="syn-punct">:</span> <span class="syn-str">"alice@co.io"</span> <span class="syn-punct">},</span>
+    <span class="syn-punct">{</span> <span class="syn-key">"name"</span><span class="syn-punct">:</span> <span class="syn-str">"Bob"</span><span class="syn-punct">,</span> <span class="syn-key">"email"</span><span class="syn-punct">:</span> <span class="syn-str">"bob@co.io"</span> <span class="syn-punct">}</span>
+  <span class="syn-punct">]</span>
+<span class="syn-punct">}</span></div>
+            </div>
+            <div class="rest-flow-arrow">&#8594;</div>
+            <div class="rest-flow-arrow-mobile">&#8594;</div>
+            <div class="rest-flow-col col-response">
+              <div class="rest-flow-col-header"><div class="col-icon">&#9745;</div> Rendered UI</div>
+              <div class="rest-rendered">
+                <div class="rest-rendered-label">Result in the DOM</div>
+                <div class="rest-rendered-content">
+                  <div class="mock-card"><span class="mock-name">Alice</span> <span class="mock-detail">alice@co.io</span></div>
+                  <div class="mock-card"><span class="mock-name">Bob</span> <span class="mock-detail">bob@co.io</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- POST -->
+        <div class="rest-panel" id="rp-post">
+          <div class="rest-flow">
+            <div class="rest-flow-col col-html">
+              <div class="rest-flow-col-header"><div class="col-icon">&lt;/&gt;</div> HTML</div>
+              <div class="rest-code"><span class="syn-tag">&lt;form</span> <span class="syn-attr">xh-post</span>=<span class="syn-val">"/api/users"</span>
+      <span class="syn-attr">xh-target</span>=<span class="syn-val">"#list"</span>
+      <span class="syn-attr">xh-swap</span>=<span class="syn-val">"beforeend"</span><span class="syn-tag">&gt;</span>
+  <span class="syn-tag">&lt;input</span> <span class="syn-attr">name</span>=<span class="syn-val">"name"</span> <span class="syn-attr">value</span>=<span class="syn-val">"Charlie"</span><span class="syn-tag">&gt;</span>
+  <span class="syn-tag">&lt;input</span> <span class="syn-attr">name</span>=<span class="syn-val">"email"</span> <span class="syn-attr">value</span>=<span class="syn-val">"charlie@co.io"</span><span class="syn-tag">&gt;</span>
+  <span class="syn-tag">&lt;button</span> <span class="syn-attr">type</span>=<span class="syn-val">"submit"</span><span class="syn-tag">&gt;</span>Create<span class="syn-tag">&lt;/button&gt;</span>
+<span class="syn-tag">&lt;/form&gt;</span></div>
+            </div>
+            <div class="rest-flow-arrow">&#8594;</div>
+            <div class="rest-flow-arrow-mobile">&#8594;</div>
+            <div class="rest-flow-col col-request">
+              <div class="rest-flow-col-header"><div class="col-icon">&#9889;</div> Request / Response</div>
+              <div class="rest-url"><span class="rest-method method-post">POST</span> <span style="color:var(--text-secondary)">/api/users</span></div>
+              <div class="rest-code" style="margin-bottom:12px"><span class="syn-comment">// Request body (auto-serialized from form)</span>
+<span class="syn-punct">{</span> <span class="syn-key">"name"</span><span class="syn-punct">:</span> <span class="syn-str">"Charlie"</span><span class="syn-punct">,</span> <span class="syn-key">"email"</span><span class="syn-punct">:</span> <span class="syn-str">"charlie@co.io"</span> <span class="syn-punct">}</span></div>
+              <div class="rest-status status-201">201 Created</div>
+              <div class="rest-code"><span class="syn-punct">{</span> <span class="syn-key">"id"</span><span class="syn-punct">:</span> <span class="syn-bool">3</span><span class="syn-punct">,</span> <span class="syn-key">"name"</span><span class="syn-punct">:</span> <span class="syn-str">"Charlie"</span><span class="syn-punct">,</span> <span class="syn-key">"email"</span><span class="syn-punct">:</span> <span class="syn-str">"charlie@co.io"</span> <span class="syn-punct">}</span></div>
+            </div>
+            <div class="rest-flow-arrow">&#8594;</div>
+            <div class="rest-flow-arrow-mobile">&#8594;</div>
+            <div class="rest-flow-col col-response">
+              <div class="rest-flow-col-header"><div class="col-icon">&#9745;</div> Rendered UI</div>
+              <div class="rest-rendered">
+                <div class="rest-rendered-label">Appended to #list</div>
+                <div class="rest-rendered-content">
+                  <div class="mock-card" style="border-left-color:#4ade80"><span class="mock-name">Charlie</span> <span class="mock-detail">charlie@co.io</span> <span class="mock-badge">NEW</span></div>
+                </div>
+              </div>
+              <div class="rest-rendered" style="margin-top:8px">
+                <div class="rest-rendered-label">Form fields auto-serialized as JSON</div>
+                <div class="rest-rendered-content">
+                  <div class="mock-form">
+                    <span class="mock-input">Charlie</span>
+                    <span class="mock-input">charlie@co.io</span>
+                    <span class="mock-btn">Create</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- PUT -->
+        <div class="rest-panel" id="rp-put">
+          <div class="rest-flow">
+            <div class="rest-flow-col col-html">
+              <div class="rest-flow-col-header"><div class="col-icon">&lt;/&gt;</div> HTML</div>
+              <div class="rest-code"><span class="syn-tag">&lt;button</span>
+  <span class="syn-attr">xh-put</span>=<span class="syn-val">"/api/users/<span class="syn-interp">{{id}}</span>"</span>
+  <span class="syn-attr">xh-vals</span>=<span class="syn-val">'{"role":"admin"}'</span>
+  <span class="syn-attr">xh-target</span>=<span class="syn-val">"#user-<span class="syn-interp">{{id}}</span>"</span>
+  <span class="syn-attr">xh-swap</span>=<span class="syn-val">"outerHTML"</span>
+  <span class="syn-attr">xh-template</span>=<span class="syn-val">"/tpl/user.html"</span><span class="syn-tag">&gt;</span>
+  Promote to Admin
+<span class="syn-tag">&lt;/button&gt;</span></div>
+            </div>
+            <div class="rest-flow-arrow">&#8594;</div>
+            <div class="rest-flow-arrow-mobile">&#8594;</div>
+            <div class="rest-flow-col col-request">
+              <div class="rest-flow-col-header"><div class="col-icon">&#9889;</div> Request / Response</div>
+              <div class="rest-url"><span class="rest-method method-put">PUT</span> <span style="color:var(--text-secondary)">/api/users/1</span></div>
+              <div class="rest-code" style="margin-bottom:12px"><span class="syn-comment">// Request body (from xh-vals)</span>
+<span class="syn-punct">{</span> <span class="syn-key">"role"</span><span class="syn-punct">:</span> <span class="syn-str">"admin"</span> <span class="syn-punct">}</span></div>
+              <div class="rest-status status-200">200 OK</div>
+              <div class="rest-code"><span class="syn-punct">{</span>
+  <span class="syn-key">"id"</span><span class="syn-punct">:</span> <span class="syn-bool">1</span><span class="syn-punct">,</span>
+  <span class="syn-key">"name"</span><span class="syn-punct">:</span> <span class="syn-str">"Alice"</span><span class="syn-punct">,</span>
+  <span class="syn-key">"role"</span><span class="syn-punct">:</span> <span class="syn-str">"admin"</span>
+<span class="syn-punct">}</span></div>
+            </div>
+            <div class="rest-flow-arrow">&#8594;</div>
+            <div class="rest-flow-arrow-mobile">&#8594;</div>
+            <div class="rest-flow-col col-response">
+              <div class="rest-flow-col-header"><div class="col-icon">&#9745;</div> Rendered UI</div>
+              <div class="rest-rendered">
+                <div class="rest-rendered-label">Element replaced via outerHTML swap</div>
+                <div class="rest-rendered-content">
+                  <div class="mock-card" style="border-left-color:#f59e0b"><span class="mock-name">Alice</span> <span class="mock-badge" style="background:rgba(245,158,11,0.15);color:#f59e0b">ADMIN</span> <span class="mock-detail">Updated in-place</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- DELETE -->
+        <div class="rest-panel" id="rp-del">
+          <div class="rest-flow">
+            <div class="rest-flow-col col-html">
+              <div class="rest-flow-col-header"><div class="col-icon">&lt;/&gt;</div> HTML</div>
+              <div class="rest-code"><span class="syn-tag">&lt;button</span>
+  <span class="syn-attr">xh-delete</span>=<span class="syn-val">"/api/users/<span class="syn-interp">{{id}}</span>"</span>
+  <span class="syn-attr">xh-target</span>=<span class="syn-val">"closest .user-row"</span>
+  <span class="syn-attr">xh-swap</span>=<span class="syn-val">"delete"</span>
+  <span class="syn-attr">xh-confirm</span>=<span class="syn-val">"Remove this user?"</span><span class="syn-tag">&gt;</span>
+  Remove
+<span class="syn-tag">&lt;/button&gt;</span></div>
+            </div>
+            <div class="rest-flow-arrow">&#8594;</div>
+            <div class="rest-flow-arrow-mobile">&#8594;</div>
+            <div class="rest-flow-col col-request">
+              <div class="rest-flow-col-header"><div class="col-icon">&#9889;</div> Request / Response</div>
+              <div class="rest-url"><span class="rest-method method-delete">DELETE</span> <span style="color:var(--text-secondary)">/api/users/2</span></div>
+              <div class="rest-status status-204">204 No Content</div>
+              <div class="rest-code"><span class="syn-comment">// No response body needed</span>
+<span class="syn-comment">// xh-swap="delete" removes the target element</span></div>
+            </div>
+            <div class="rest-flow-arrow">&#8594;</div>
+            <div class="rest-flow-arrow-mobile">&#8594;</div>
+            <div class="rest-flow-col col-response">
+              <div class="rest-flow-col-header"><div class="col-icon">&#9745;</div> Rendered UI</div>
+              <div class="rest-rendered">
+                <div class="rest-rendered-label">Element removed from DOM</div>
+                <div class="rest-rendered-content">
+                  <div class="mock-card"><span class="mock-name">Alice</span> <span class="mock-detail">alice@co.io</span></div>
+                  <div class="mock-card" style="opacity:0.3;border-left-color:#ef4444;text-decoration:line-through"><span class="mock-name mock-deleted">Bob</span> <span class="mock-detail mock-deleted">bob@co.io</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- PATCH -->
+        <div class="rest-panel" id="rp-patch">
+          <div class="rest-flow">
+            <div class="rest-flow-col col-html">
+              <div class="rest-flow-col-header"><div class="col-icon">&lt;/&gt;</div> HTML</div>
+              <div class="rest-code"><span class="syn-tag">&lt;input</span> <span class="syn-attr">type</span>=<span class="syn-val">"checkbox"</span>
+  <span class="syn-attr">xh-patch</span>=<span class="syn-val">"/api/todos/<span class="syn-interp">{{id}}</span>"</span>
+  <span class="syn-attr">xh-vals</span>=<span class="syn-val">'{"done":true}'</span>
+  <span class="syn-attr">xh-trigger</span>=<span class="syn-val">"change"</span>
+  <span class="syn-attr">xh-target</span>=<span class="syn-val">"#todo-<span class="syn-interp">{{id}}</span>"</span>
+  <span class="syn-attr">xh-template</span>=<span class="syn-val">"/tpl/todo.html"</span><span class="syn-tag">&gt;</span></div>
+            </div>
+            <div class="rest-flow-arrow">&#8594;</div>
+            <div class="rest-flow-arrow-mobile">&#8594;</div>
+            <div class="rest-flow-col col-request">
+              <div class="rest-flow-col-header"><div class="col-icon">&#9889;</div> Request / Response</div>
+              <div class="rest-url"><span class="rest-method method-patch">PATCH</span> <span style="color:var(--text-secondary)">/api/todos/5</span></div>
+              <div class="rest-code" style="margin-bottom:12px"><span class="syn-comment">// Only sends changed fields</span>
+<span class="syn-punct">{</span> <span class="syn-key">"done"</span><span class="syn-punct">:</span> <span class="syn-bool">true</span> <span class="syn-punct">}</span></div>
+              <div class="rest-status status-200">200 OK</div>
+              <div class="rest-code"><span class="syn-punct">{</span>
+  <span class="syn-key">"id"</span><span class="syn-punct">:</span> <span class="syn-bool">5</span><span class="syn-punct">,</span>
+  <span class="syn-key">"title"</span><span class="syn-punct">:</span> <span class="syn-str">"Ship v1"</span><span class="syn-punct">,</span>
+  <span class="syn-key">"done"</span><span class="syn-punct">:</span> <span class="syn-bool">true</span>
+<span class="syn-punct">}</span></div>
+            </div>
+            <div class="rest-flow-arrow">&#8594;</div>
+            <div class="rest-flow-arrow-mobile">&#8594;</div>
+            <div class="rest-flow-col col-response">
+              <div class="rest-flow-col-header"><div class="col-icon">&#9745;</div> Rendered UI</div>
+              <div class="rest-rendered">
+                <div class="rest-rendered-label">Todo updated in-place</div>
+                <div class="rest-rendered-content">
+                  <div class="mock-card" style="border-left-color:#a78bfa"><span style="text-decoration:line-through;color:var(--text-muted)">Ship v1</span> <span class="mock-badge" style="background:rgba(167,139,250,0.15);color:#a78bfa">DONE</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1683,6 +2183,25 @@ img { max-width: 100%; }
   for (var n = 0; n < tabs.length; n++) {
     tabs[n].addEventListener("click", function() {
       activateTab(this.getAttribute("data-tab"));
+    });
+  }
+
+  // --- REST API tabs ---
+  var restTabs = document.querySelectorAll(".rest-tab");
+  var restPanels = document.querySelectorAll(".rest-panel");
+
+  function activateRestTab(tabId) {
+    for (var rt = 0; rt < restTabs.length; rt++) {
+      restTabs[rt].classList.toggle("active", restTabs[rt].getAttribute("data-rtab") === tabId);
+    }
+    for (var rp = 0; rp < restPanels.length; rp++) {
+      restPanels[rp].classList.toggle("active", restPanels[rp].id === tabId);
+    }
+  }
+
+  for (var r = 0; r < restTabs.length; r++) {
+    restTabs[r].addEventListener("click", function() {
+      activateRestTab(this.getAttribute("data-rtab"));
     });
   }
 
