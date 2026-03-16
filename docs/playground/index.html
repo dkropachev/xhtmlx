@@ -990,11 +990,11 @@ code, pre {
       '    .xh-indicator { opacity: 0; transition: opacity 200ms ease-in; }\n' +
       '    .xh-request .xh-indicator, .xh-request.xh-indicator { opacity: 1; }\n' +
       '  </style>\n' +
-      '  <script>\n' + mockScript + '  <\/script>\n' +
+      '  <scr' + 'ipt>\n' + mockScript + '  <\/scr' + 'ipt>\n' +
       '</head>\n' +
       '<body>\n' +
       htmlCode + '\n' +
-      '<script>\n' + xhtmlxSource + '\n<\/script>\n' +
+      '<scr' + 'ipt>\n' + xhtmlxSource + '\n<\/scr' + 'ipt>\n' +
       '</body>\n' +
       '</html>';
 
@@ -1341,12 +1341,14 @@ code, pre {
       .then(function(src) {
         xhtmlxSource = src;
         runPreview();
+        window.__playgroundReady = true;
       })
       .catch(function(err) {
-        console.error("[playground] Failed to load xhtmlx.js:", err);
+        console.error("[playground] Failed to load xhtmlx.js from " + xhtmlxUrl + ":", err);
         // Fallback: try external script tag
         xhtmlxSource = 'document.write("<scr"+"ipt src=\\"" + "' + xhtmlxUrl + '" + "\\"><\\/scr"+"ipt>");';
         runPreview();
+        window.__playgroundReady = true;
       });
   }
 
