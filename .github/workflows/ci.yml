@@ -16,9 +16,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
-      - run: npm ci
-      - run: node --check xhtmlx.js
-      - run: npm run lint
+      - run: make ci-lint
 
   test:
     name: Test (Node ${{ matrix.node-version }})
@@ -32,11 +30,10 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
-      - run: npm ci
-      - run: npm test
+      - run: make ci-test
       - name: Run tests with coverage
         if: matrix.node-version == 20
-        run: npx jest --coverage
+        run: make test-coverage
       - name: Upload coverage
         if: matrix.node-version == 20
         uses: actions/upload-artifact@v4
@@ -54,9 +51,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-      - run: npx playwright install chromium
-      - run: npx playwright test
+      - run: make ci-browser
       - name: Upload test results
         if: failure()
         uses: actions/upload-artifact@v4
@@ -75,17 +70,12 @@ jobs:
         with:
           node-version: 20
           cache: npm
-      - run: npm ci
-      - run: npm run build
-      - name: Check minified file
-        run: |
-          ls -la xhtmlx.min.js
-          echo "Minified size: $(wc -c < xhtmlx.min.js) bytes"
-          echo "Gzipped size: $(gzip -c xhtmlx.min.js | wc -c) bytes"
+      - run: make ci-build
       - uses: actions/upload-artifact@v4
         with:
           name: dist
           path: |
             xhtmlx.js
             xhtmlx.min.js
+            xhtmlx.min.js.map
           retention-days: 30
