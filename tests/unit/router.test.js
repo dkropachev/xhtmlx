@@ -3,7 +3,7 @@
  */
 
 const xhtmlx = require('../../xhtmlx.js');
-const { router, DataContext, templateCache } = xhtmlx._internals;
+const { router, templateCache } = xhtmlx._internals;
 
 function flushPromises() {
   return new Promise(resolve => setTimeout(resolve, 0));
@@ -13,7 +13,6 @@ describe('SPA Router', () => {
   let container;
   let outlet;
   let pushStateSpy;
-  let originalPathname;
 
   beforeEach(() => {
     // Reset router state
@@ -33,8 +32,6 @@ describe('SPA Router', () => {
     xhtmlx.clearTemplateCache();
 
     pushStateSpy = jest.spyOn(window.history, 'pushState').mockImplementation(() => {});
-
-    originalPathname = window.location.pathname;
   });
 
   afterEach(() => {

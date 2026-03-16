@@ -23,7 +23,7 @@ test.describe("i18n", () => {
   test("switching locale updates all i18n elements", async ({ page }) => {
     await page.goto("/test/polling.html");
     await page.waitForTimeout(500);
-    await page.evaluate(() => { xhtmlx.i18n.locale = "es"; });
+    await page.evaluate(() => { window.xhtmlx.i18n.locale = "es"; }); // eslint-disable-line no-undef
     await page.waitForTimeout(200);
     expect(await page.locator("#i18n-greeting").textContent()).toBe("Hola");
     expect(await page.locator("#i18n-farewell").textContent()).toBe("Adiós");
@@ -32,9 +32,9 @@ test.describe("i18n", () => {
   test("switching back to original locale works", async ({ page }) => {
     await page.goto("/test/polling.html");
     await page.waitForTimeout(500);
-    await page.evaluate(() => { xhtmlx.i18n.locale = "es"; });
+    await page.evaluate(() => { window.xhtmlx.i18n.locale = "es"; }); // eslint-disable-line no-undef
     await page.waitForTimeout(200);
-    await page.evaluate(() => { xhtmlx.i18n.locale = "en"; });
+    await page.evaluate(() => { window.xhtmlx.i18n.locale = "en"; }); // eslint-disable-line no-undef
     await page.waitForTimeout(200);
     expect(await page.locator("#i18n-greeting").textContent()).toBe("Hello");
   });

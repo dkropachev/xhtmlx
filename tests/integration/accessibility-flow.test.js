@@ -191,9 +191,6 @@ describe("Accessibility features full flow", () => {
       <div id="form-area"></div>
     `;
 
-    // Mock focus to track it was called
-    const focusSpy = jest.fn();
-
     xhtmlx.process(document.body);
     await flushPromises();
 

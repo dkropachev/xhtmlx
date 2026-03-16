@@ -3,7 +3,7 @@
  */
 
 const xhtmlx = require("../../xhtmlx.js");
-const { validateElement, DataContext, elementStates } = xhtmlx._internals;
+const { validateElement } = xhtmlx._internals;
 
 describe("validateElement", () => {
   let container;

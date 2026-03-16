@@ -3,10 +3,6 @@
  */
 const xhtmlx = require("../../xhtmlx.js");
 
-function flushPromises() {
-  return new Promise(resolve => setTimeout(resolve, 0));
-}
-
 beforeEach(() => {
   document.body.innerHTML = "";
   global.fetch = jest.fn();
@@ -21,16 +17,6 @@ afterEach(() => {
   i18n._locale = null;
   i18n._fallback = "en";
 });
-
-function mockFetchJSON(data, status = 200) {
-  global.fetch.mockResolvedValue({
-    ok: status >= 200 && status < 300,
-    status: status,
-    statusText: status === 200 ? "OK" : "Error",
-    json: () => Promise.resolve(data),
-    text: () => Promise.resolve(JSON.stringify(data))
-  });
-}
 
 describe("i18n integration flow", () => {
   test("xh-i18n elements render translated text after locale set", () => {

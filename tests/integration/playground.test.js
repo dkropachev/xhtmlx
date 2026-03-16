@@ -314,7 +314,7 @@ describe("Playground - Mock API default routes", () => {
     const match = html.match(/var DEFAULT_MOCK_JSON\s*=\s*(\{[\s\S]*?\n  \});/);
     if (match) {
       // Use Function constructor to safely evaluate the JS object literal
-      mockJson = (new Function("return " + match[1]))();
+      mockJson = (new Function("return " + match[1]))(); // eslint-disable-line no-new-func
     }
   });
 

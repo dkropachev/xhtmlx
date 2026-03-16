@@ -9,9 +9,7 @@ const {
   applyBindings,
   performSwap,
   processEach,
-  processBindingsInTree,
-  config,
-  injectDefaultCSS
+  config
 } = xhtmlx._internals;
 
 describe('CSP-safe mode', () => {

@@ -71,11 +71,9 @@ describe('Accessibility — auto ARIA attributes', () => {
       initElement(el);
 
       // Check aria-busy is set during request
-      var busyDuringRequest = false;
       var originalFetch = global.fetch;
       global.fetch = jest.fn(function() {
         // At this point, aria-busy should be set
-        busyDuringRequest = target.getAttribute('aria-busy') === 'true';
         return originalFetch();
       });
 
