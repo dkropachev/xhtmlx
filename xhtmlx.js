@@ -47,6 +47,9 @@
   /** Map<string, {data: string, timestamp: number}> — response cache (verb:url → body) */
   var responseCache = new Map();
 
+  /** Cache for path.split(".") results in DataContext.resolve */
+  var pathSplitCache = {};
+
   // ---------------------------------------------------------------------------
   // Default CSS injection
   // ---------------------------------------------------------------------------
@@ -111,7 +114,7 @@
       return rawValue;
     }
 
-    var parts = path.split(".");
+    var parts = pathSplitCache[path] || (pathSplitCache[path] = path.split("."));
 
     // --- special variables ---------------------------------------------------
     if (parts[0] === "$index") {
@@ -257,15 +260,11 @@
    */
   function interpolateDOM(root, ctx) {
     var walker = document.createTreeWalker(root, 4 /* NodeFilter.SHOW_TEXT */);
-    var textNodes = [];
     while (walker.nextNode()) {
-      textNodes.push(walker.currentNode);
-    }
-    for (var t = 0; t < textNodes.length; t++) {
-      var node = textNodes[t];
-      if (INTERP_RE.test(node.nodeValue)) {
-        node.nodeValue = interpolate(node.nodeValue, ctx, false);
-      }
+      var node = walker.currentNode;
+      var original = node.nodeValue;
+      var replaced = interpolate(original, ctx, false);
+      if (replaced !== original) node.nodeValue = replaced;
     }
 
     // Interpolate non-xh-* attributes on all elements
@@ -276,9 +275,9 @@
         var name = attrs[a].name;
         // Skip xh-* attributes — they are processed by directives/executeRequest
         if (name.indexOf("xh-") === 0) continue;
-        if (INTERP_RE.test(attrs[a].value)) {
-          attrs[a].value = interpolate(attrs[a].value, ctx, false);
-        }
+        var origAttr = attrs[a].value;
+        var replacedAttr = interpolate(origAttr, ctx, false);
+        if (replacedAttr !== origAttr) attrs[a].value = replacedAttr;
       }
     }
   }
@@ -837,12 +836,17 @@
 
   function showIndicator(el) {
     var sel = el.getAttribute("xh-indicator");
-    if (!sel) return;
+    if (!sel) return null;
     var ind = document.querySelector(sel);
     if (ind) ind.classList.add(config.requestClass);
+    return ind;
   }
 
-  function hideIndicator(el) {
+  function hideIndicator(el, cachedInd) {
+    if (cachedInd) {
+      cachedInd.classList.remove(config.requestClass);
+      return;
+    }
     var sel = el.getAttribute("xh-indicator");
     if (!sel) return;
     var ind = document.querySelector(sel);
@@ -1414,7 +1418,7 @@
     }
 
     // Show indicator
-    showIndicator(el);
+    var indicatorEl = showIndicator(el);
 
     // Accessibility: mark target as busy
     var ariaTarget = getSwapTarget(el, false);
@@ -1466,7 +1470,7 @@
         handleError(el, ctx, 0, "Network Error", err.message, templateStack);
       })
       .finally(function () {
-        hideIndicator(el);
+        hideIndicator(el, indicatorEl);
         if (ariaTarget) ariaTarget.removeAttribute("aria-busy");
         if (disabledClass) {
           el.classList.remove(disabledClass);
@@ -2104,57 +2108,20 @@
    * @returns {Element[]}
    */
   function gatherXhElements(root) {
-    // We need a comprehensive selector for any element with xh-* attributes
-    var selectors = [
-      "[xh-get]", "[xh-post]", "[xh-put]", "[xh-delete]", "[xh-patch]",
-      "[xh-text]", "[xh-html]", "[xh-each]", "[xh-if]", "[xh-unless]",
-      "[xh-trigger]", "[xh-template]", "[xh-target]", "[xh-swap]",
-      "[xh-indicator]", "[xh-vals]", "[xh-headers]",
-      "[xh-error-template]", "[xh-error-target]",
-      "[xh-model]", "[xh-show]", "[xh-hide]",
-      "[xh-disabled-class]",
-      "[xh-push-url]", "[xh-replace-url]",
-      "[xh-cache]",
-      "[xh-retry]",
-      "[xh-ws]", "[xh-ws-send]",
-      "[xh-boost]",
-      "[xh-validate]",
-      "[xh-i18n]",
-      "[xh-router]", "[xh-route]",
-      "[xh-focus]", "[xh-aria-live]"
-    ];
-
-    // Also match xh-attr-* and xh-error-template-*
     var results = [];
-    var all;
-    try {
-      all = root.querySelectorAll(selectors.join(","));
-    } catch (_) {
-      all = root.querySelectorAll("*");
-    }
-
     var seen = new Set();
-    for (var i = 0; i < all.length; i++) {
-      if (!seen.has(all[i])) {
-        seen.add(all[i]);
-        results.push(all[i]);
-      }
-    }
+    var all = root.querySelectorAll("*");
 
-    // Also check for xh-attr-* elements (they won't match the fixed selectors)
-    var allEls = root.querySelectorAll("*");
-    for (var j = 0; j < allEls.length; j++) {
-      if (seen.has(allEls[j])) continue;
-      var attrs = allEls[j].attributes;
-      for (var k = 0; k < attrs.length; k++) {
-        if (attrs[k].name.indexOf("xh-attr-") === 0 ||
-            attrs[k].name.indexOf("xh-error-template-") === 0 ||
-            attrs[k].name.indexOf("xh-class-") === 0 ||
-            attrs[k].name.indexOf("xh-on-") === 0 ||
-            attrs[k].name.indexOf("xh-i18n-") === 0) {
-          results.push(allEls[j]);
-          seen.add(allEls[j]);
-          break;
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      var attrs = el.attributes;
+      for (var j = 0; j < attrs.length; j++) {
+        if (attrs[j].name.indexOf("xh-") === 0) {
+          if (!seen.has(el)) {
+            seen.add(el);
+            results.push(el);
+          }
+          break; // Found one xh- attr, no need to check more on this element
         }
       }
     }
@@ -2174,11 +2141,11 @@
    * @param {string}  actionStr – The action string (e.g. "toggleClass:active").
    */
   function attachOnHandler(el, event, actionStr) {
-    el.addEventListener(event, function(_evt) {
-      var parts = actionStr.split(":");
-      var action = parts[0];
-      var arg = parts.slice(1).join(":");
+    var parts = actionStr.split(":");
+    var action = parts[0];
+    var arg = parts.slice(1).join(":");
 
+    el.addEventListener(event, function(_evt) {
       switch (action) {
         case "toggleClass":
           el.classList.toggle(arg);
