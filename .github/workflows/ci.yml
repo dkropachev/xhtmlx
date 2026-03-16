@@ -34,6 +34,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - name: Run tests with coverage
+        if: matrix.node-version == 20
+        run: npx jest --coverage
       - name: Upload coverage
         if: matrix.node-version == 20
         uses: actions/upload-artifact@v4

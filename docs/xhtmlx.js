@@ -22,7 +22,10 @@
     errorClass: "xh-error",
     batchThreshold: 100, // xh-each arrays above this size use rAF batching
     defaultErrorTemplate: null, // Global fallback error template URL
-    defaultErrorTarget: null    // Global fallback error target CSS selector
+    defaultErrorTarget: null,   // Global fallback error target CSS selector
+    templatePrefix: "",         // Prefix prepended to all xh-template URLs
+    apiPrefix: "",              // Prefix prepended to all REST verb URLs
+    uiVersion: null             // Current UI version identifier (any string)
   };
 
   // ---------------------------------------------------------------------------
@@ -41,6 +44,12 @@
   /** Generation counter per element for discarding stale responses */
   var generationMap = new WeakMap();
 
+  /** Map<string, {data: string, timestamp: number}> — response cache (verb:url → body) */
+  var responseCache = new Map();
+
+  /** Cache for path.split(".") results in DataContext.resolve */
+  var pathSplitCache = {};
+
   // ---------------------------------------------------------------------------
   // Default CSS injection
   // ---------------------------------------------------------------------------
@@ -51,7 +60,10 @@
     style.id = id;
     style.textContent =
       ".xh-indicator { opacity: 0; transition: opacity 200ms ease-in; }\n" +
-      ".xh-request .xh-indicator, .xh-request.xh-indicator { opacity: 1; }\n";
+      ".xh-request .xh-indicator, .xh-request.xh-indicator { opacity: 1; }\n" +
+      ".xh-added { }\n" +
+      ".xh-settled { }\n" +
+      ".xh-invalid { border-color: #ef4444; }\n";
     document.head.appendChild(style);
   }
 
@@ -89,7 +101,20 @@
   DataContext.prototype.resolve = function (path) {
     if (path == null || path === "") return undefined;
 
-    var parts = path.split(".");
+    // -- transform pipe support: "price | currency" --------------------------
+    if (path.indexOf(" | ") !== -1) {
+      var pipeParts = path.split(" | ");
+      var rawValue = this.resolve(pipeParts[0].trim());
+      for (var p = 1; p < pipeParts.length; p++) {
+        var transformName = pipeParts[p].trim();
+        if (transforms[transformName]) {
+          rawValue = transforms[transformName](rawValue);
+        }
+      }
+      return rawValue;
+    }
+
+    var parts = pathSplitCache[path] || (pathSplitCache[path] = path.split("."));
 
     // --- special variables ---------------------------------------------------
     if (parts[0] === "$index") {
@@ -138,6 +163,65 @@
   }
 
   // ---------------------------------------------------------------------------
+  // MutableDataContext — reactive wrapper around DataContext
+  // ---------------------------------------------------------------------------
+
+  /**
+   * A DataContext subclass that supports live reactivity.
+   * When a field is changed via set(), all subscribers for that path are notified.
+   *
+   * @param {*}           data   – The JSON payload for this level.
+   * @param {DataContext}  parent – Enclosing context (null at root).
+   * @param {number|null}  index  – Current iteration index for xh-each.
+   */
+  function MutableDataContext(data, parent, index) {
+    DataContext.call(this, data, parent, index);
+    this._subscribers = {}; // path -> [callback]
+  }
+  MutableDataContext.prototype = Object.create(DataContext.prototype);
+  MutableDataContext.prototype.constructor = MutableDataContext;
+
+  /**
+   * Set a value at the given dotted path, creating intermediate objects as needed.
+   * Notifies all subscribers for the given path.
+   *
+   * @param {string} path  – e.g. "user.name"
+   * @param {*}      value – The new value.
+   */
+  MutableDataContext.prototype.set = function(path, value) {
+    var parts = path.split(".");
+    var obj = this.data;
+    for (var i = 0; i < parts.length - 1; i++) {
+      if (obj[parts[i]] == null) obj[parts[i]] = {};
+      obj = obj[parts[i]];
+    }
+    obj[parts[parts.length - 1]] = value;
+    this._notify(path);
+  };
+
+  /**
+   * Subscribe to changes on a given path.
+   *
+   * @param {string}   path     – The dotted path to watch.
+   * @param {Function} callback – Called when the value at path changes.
+   */
+  MutableDataContext.prototype.subscribe = function(path, callback) {
+    if (!this._subscribers[path]) this._subscribers[path] = [];
+    this._subscribers[path].push(callback);
+  };
+
+  /**
+   * Notify all subscribers for a given path.
+   * @param {string} path
+   */
+  MutableDataContext.prototype._notify = function(path) {
+    var subs = this._subscribers[path];
+    if (subs) {
+      for (var i = 0; i < subs.length; i++) subs[i]();
+    }
+  };
+
+  // ---------------------------------------------------------------------------
   // Interpolation  — {{field}} replacement
   // ---------------------------------------------------------------------------
 
@@ -176,15 +260,11 @@
    */
   function interpolateDOM(root, ctx) {
     var walker = document.createTreeWalker(root, 4 /* NodeFilter.SHOW_TEXT */);
-    var textNodes = [];
     while (walker.nextNode()) {
-      textNodes.push(walker.currentNode);
-    }
-    for (var t = 0; t < textNodes.length; t++) {
-      var node = textNodes[t];
-      if (INTERP_RE.test(node.nodeValue)) {
-        node.nodeValue = interpolate(node.nodeValue, ctx, false);
-      }
+      var node = walker.currentNode;
+      var original = node.nodeValue;
+      var replaced = interpolate(original, ctx, false);
+      if (replaced !== original) node.nodeValue = replaced;
     }
 
     // Interpolate non-xh-* attributes on all elements
@@ -195,9 +275,9 @@
         var name = attrs[a].name;
         // Skip xh-* attributes — they are processed by directives/executeRequest
         if (name.indexOf("xh-") === 0) continue;
-        if (INTERP_RE.test(attrs[a].value)) {
-          attrs[a].value = interpolate(attrs[a].value, ctx, false);
-        }
+        var origAttr = attrs[a].value;
+        var replacedAttr = interpolate(origAttr, ctx, false);
+        if (replacedAttr !== origAttr) attrs[a].value = replacedAttr;
       }
     }
   }
@@ -212,12 +292,15 @@
    * @returns {Promise<string>}
    */
   function fetchTemplate(url) {
-    if (templateCache.has(url)) return templateCache.get(url);
-    var promise = fetch(url).then(function (res) {
-      if (!res.ok) throw new Error("Template fetch failed: " + url + " (" + res.status + ")");
+    // Prepend template prefix (for UI versioning)
+    var fetchUrl = config.templatePrefix ? config.templatePrefix + url : url;
+    // Cache by prefixed URL so version switches get fresh templates
+    if (templateCache.has(fetchUrl)) return templateCache.get(fetchUrl);
+    var promise = fetch(fetchUrl).then(function (res) {
+      if (!res.ok) throw new Error("Template fetch failed: " + fetchUrl + " (" + res.status + ")");
       return res.text();
     });
-    templateCache.set(url, promise);
+    templateCache.set(fetchUrl, promise);
     return promise;
   }
 
@@ -298,6 +381,36 @@
    * @returns {boolean} false if the element was removed by xh-if/xh-unless
    */
   function applyBindings(el, ctx) {
+    // -- xh-show ----------------------------------------------------------------
+    var showAttr = el.getAttribute("xh-show");
+    if (showAttr != null) {
+      var sval = ctx.resolve(showAttr);
+      el.style.display = sval ? "" : "none";
+      if (ctx instanceof MutableDataContext) {
+        (function(field, element, context) {
+          context.subscribe(field, function() {
+            var newVal = context.resolve(field);
+            element.style.display = newVal ? "" : "none";
+          });
+        })(showAttr, el, ctx);
+      }
+    }
+
+    // -- xh-hide ----------------------------------------------------------------
+    var hideAttr = el.getAttribute("xh-hide");
+    if (hideAttr != null) {
+      var hdval = ctx.resolve(hideAttr);
+      el.style.display = hdval ? "none" : "";
+      if (ctx instanceof MutableDataContext) {
+        (function(field, element, context) {
+          context.subscribe(field, function() {
+            var newVal = context.resolve(field);
+            element.style.display = newVal ? "none" : "";
+          });
+        })(hideAttr, el, ctx);
+      }
+    }
+
     // -- xh-if ----------------------------------------------------------------
     var ifAttr = el.getAttribute("xh-if");
     if (ifAttr != null) {
@@ -323,6 +436,14 @@
     if (textAttr != null) {
       var tv = ctx.resolve(textAttr);
       el.textContent = tv != null ? String(tv) : "";
+      if (ctx instanceof MutableDataContext) {
+        (function(field, element, context) {
+          context.subscribe(field, function() {
+            var newVal = context.resolve(field);
+            element.textContent = newVal != null ? String(newVal) : "";
+          });
+        })(textAttr, el, ctx);
+      }
     }
 
     // -- xh-html --------------------------------------------------------------
@@ -330,6 +451,14 @@
     if (htmlAttr != null) {
       var hv = ctx.resolve(htmlAttr);
       el.innerHTML = hv != null ? String(hv) : "";
+      if (ctx instanceof MutableDataContext) {
+        (function(field, element, context) {
+          context.subscribe(field, function() {
+            var newVal = context.resolve(field);
+            element.innerHTML = newVal != null ? String(newVal) : "";
+          });
+        })(htmlAttr, el, ctx);
+      }
     }
 
     // -- xh-attr-* ------------------------------------------------------------
@@ -342,6 +471,92 @@
         if (aval != null) {
           el.setAttribute(targetAttr, String(aval));
         }
+        if (ctx instanceof MutableDataContext) {
+          (function(field, tAttr, element, context) {
+            context.subscribe(field, function() {
+              var newVal = context.resolve(field);
+              if (newVal != null) {
+                element.setAttribute(tAttr, String(newVal));
+              }
+            });
+          })(attrs[i].value, targetAttr, el, ctx);
+        }
+      }
+    }
+
+    // -- xh-model ---------------------------------------------------------------
+    var modelAttr = el.getAttribute("xh-model");
+    if (modelAttr != null) {
+      var mv = ctx.resolve(modelAttr);
+      var tag = el.tagName.toLowerCase();
+      var type = (el.getAttribute("type") || "").toLowerCase();
+
+      if (tag === "select") {
+        // Set the matching option as selected
+        var options = el.options;
+        for (var s = 0; s < options.length; s++) {
+          options[s].selected = (options[s].value === mv);
+        }
+      } else if (type === "checkbox") {
+        el.checked = !!mv;
+      } else if (type === "radio") {
+        el.checked = (el.value === mv);
+      } else if (tag === "textarea") {
+        el.value = mv != null ? String(mv) : "";
+      } else {
+        // text, email, number, hidden, etc.
+        el.value = mv != null ? String(mv) : "";
+      }
+
+      // Live reactivity: when the user edits an xh-model input, call ctx.set()
+      if (ctx instanceof MutableDataContext) {
+        (function(field, element, context) {
+          var eventName = (type === "checkbox" || type === "radio" || tag === "select") ? "change" : "input";
+          element.addEventListener(eventName, function() {
+            var newValue;
+            if (type === "checkbox") {
+              newValue = element.checked;
+            } else {
+              newValue = element.value;
+            }
+            context.set(field, newValue);
+          });
+        })(modelAttr, el, ctx);
+      }
+    }
+
+    // -- xh-class-* -------------------------------------------------------------
+    for (var c = attrs.length - 1; c >= 0; c--) {
+      var cName = attrs[c].name;
+      if (cName.indexOf("xh-class-") === 0) {
+        var className = cName.slice(9); // after "xh-class-"
+        var cval = ctx.resolve(attrs[c].value);
+        if (cval) {
+          el.classList.add(className);
+        } else {
+          el.classList.remove(className);
+        }
+        if (ctx instanceof MutableDataContext) {
+          (function(field, clsName, element, context) {
+            context.subscribe(field, function() {
+              var newVal = context.resolve(field);
+              if (newVal) {
+                element.classList.add(clsName);
+              } else {
+                element.classList.remove(clsName);
+              }
+            });
+          })(attrs[c].value, className, el, ctx);
+        }
+      }
+    }
+
+    // -- custom directives -------------------------------------------------------
+    for (var cd = 0; cd < customDirectives.length; cd++) {
+      var directive = customDirectives[cd];
+      var cdVal = el.getAttribute(directive.name);
+      if (cdVal != null) {
+        directive.handler(el, cdVal, ctx);
       }
     }
 
@@ -381,7 +596,8 @@
       var clone = el.cloneNode(true);
       // Mark clone so renderTemplate's second pass doesn't rebind with wrong context
       clone.setAttribute("data-xh-each-item", "");
-      var itemCtx = new DataContext(item, ctx, idx);
+      var ItemCtxClass = (ctx instanceof MutableDataContext) ? MutableDataContext : DataContext;
+      var itemCtx = new ItemCtxClass(item, ctx, idx);
       applyBindings(clone, itemCtx);
       // Process children bindings
       processBindingsInTree(clone, itemCtx);
@@ -571,6 +787,26 @@
       }
     }
 
+    // Collect xh-model values from the element's scope
+    var scope = form || el.closest("[xh-get],[xh-post],[xh-put],[xh-patch],[xh-delete]") || el;
+    var modelInputs = scope.querySelectorAll("[xh-model]");
+    for (var m = 0; m < modelInputs.length; m++) {
+      var mEl = modelInputs[m];
+      var field = mEl.getAttribute("xh-model");
+      var mTag = mEl.tagName.toLowerCase();
+      var mType = (mEl.getAttribute("type") || "").toLowerCase();
+
+      if (mType === "checkbox") {
+        body[field] = mEl.checked;
+      } else if (mType === "radio") {
+        if (mEl.checked) body[field] = mEl.value;
+      } else if (mTag === "select") {
+        body[field] = mEl.value;
+      } else {
+        body[field] = mEl.value;
+      }
+    }
+
     return JSON.stringify(body);
   }
 
@@ -600,12 +836,17 @@
 
   function showIndicator(el) {
     var sel = el.getAttribute("xh-indicator");
-    if (!sel) return;
+    if (!sel) return null;
     var ind = document.querySelector(sel);
     if (ind) ind.classList.add(config.requestClass);
+    return ind;
   }
 
-  function hideIndicator(el) {
+  function hideIndicator(el, cachedInd) {
+    if (cachedInd) {
+      cachedInd.classList.remove(config.requestClass);
+      return;
+    }
     var sel = el.getAttribute("xh-indicator");
     if (!sel) return;
     var ind = document.querySelector(sel);
@@ -795,6 +1036,10 @@
         state.observers[k].disconnect();
       }
     }
+    if (state.ws) {
+      state.ws.close(1000);
+      state.ws = null;
+    }
   }
 
   /**
@@ -941,6 +1186,160 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Settle class helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Apply settle classes to newly inserted elements.
+   * Adds "xh-added" immediately, then swaps to "xh-settled" after two
+   * animation frames so that CSS transitions can react.
+   *
+   * @param {Element} processTarget – The container of new elements.
+   */
+  function applySettleClasses(processTarget) {
+    if (!processTarget) return;
+    var newEls = processTarget.querySelectorAll ? Array.prototype.slice.call(processTarget.querySelectorAll("*")) : [];
+    if (processTarget.classList) newEls.unshift(processTarget);
+
+    for (var se = 0; se < newEls.length; se++) {
+      if (newEls[se].classList) newEls[se].classList.add("xh-added");
+    }
+
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        for (var sf = 0; sf < newEls.length; sf++) {
+          if (newEls[sf].classList) {
+            newEls[sf].classList.remove("xh-added");
+            newEls[sf].classList.add("xh-settled");
+          }
+        }
+      });
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Retry with backoff helper
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Fetch with automatic retry on 5xx errors and network failures.
+   *
+   * @param {string}  url       – Request URL.
+   * @param {Object}  opts      – Fetch options.
+   * @param {number}  retries   – Maximum number of retries.
+   * @param {number}  delay     – Base delay in ms (doubled each attempt).
+   * @param {number}  attempt   – Current attempt (0-based).
+   * @param {Element} el        – Element for emitting events.
+   * @returns {Promise<Response>}
+   */
+  function fetchWithRetry(url, opts, retries, delay, attempt, el) {
+    return fetch(url, opts).then(function (response) {
+      if (!response.ok && response.status >= 500 && attempt < retries) {
+        emitEvent(el, "xh:retry", { attempt: attempt + 1, maxRetries: retries, status: response.status }, false);
+        return new Promise(function (resolve) {
+          setTimeout(function () {
+            resolve(fetchWithRetry(url, opts, retries, delay, attempt + 1, el));
+          }, delay * Math.pow(2, attempt));
+        });
+      }
+      return response;
+    }).catch(function (err) {
+      if (attempt < retries) {
+        emitEvent(el, "xh:retry", { attempt: attempt + 1, maxRetries: retries, error: err.message }, false);
+        return new Promise(function (resolve) {
+          setTimeout(function () {
+            resolve(fetchWithRetry(url, opts, retries, delay, attempt + 1, el));
+          }, delay * Math.pow(2, attempt));
+        });
+      }
+      throw err;
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Validation
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Validate fields within the scope of an element.
+   * Looks for [xh-validate] elements in the form or element scope and checks
+   * rules: required, pattern, min/max, minlength/maxlength.
+   *
+   * @param {Element} el – The element that triggered the request.
+   * @returns {boolean} true if all valid, false if errors found.
+   */
+  function validateElement(el) {
+    var scope = el.tagName.toLowerCase() === "form" ? el : el.closest("form") || el;
+    var fields = scope.querySelectorAll("[xh-validate]");
+    var errors = [];
+
+    for (var i = 0; i < fields.length; i++) {
+      var field = fields[i];
+      var rules = field.getAttribute("xh-validate").split(" ");
+      var value = field.value || "";
+      var fieldName = field.getAttribute("name") || field.getAttribute("xh-model") || "field";
+      var customMsg = field.getAttribute("xh-validate-message");
+      var errorClass = field.getAttribute("xh-validate-class") || "xh-invalid";
+      var errorTarget = field.getAttribute("xh-validate-target");
+      var error = null;
+
+      for (var r = 0; r < rules.length; r++) {
+        var rule = rules[r];
+        if (rule === "required" && !value.trim()) {
+          error = customMsg || fieldName + " is required";
+        }
+      }
+
+      // xh-validate-pattern
+      var pattern = field.getAttribute("xh-validate-pattern");
+      if (pattern && value && !new RegExp(pattern).test(value)) {
+        error = customMsg || fieldName + " format is invalid";
+      }
+
+      // xh-validate-min / xh-validate-max
+      var min = field.getAttribute("xh-validate-min");
+      var max = field.getAttribute("xh-validate-max");
+      if (min != null && Number(value) < Number(min)) {
+        error = customMsg || fieldName + " must be at least " + min;
+      }
+      if (max != null && Number(value) > Number(max)) {
+        error = customMsg || fieldName + " must be at most " + max;
+      }
+
+      // xh-validate-minlength / xh-validate-maxlength
+      var minlen = field.getAttribute("xh-validate-minlength");
+      var maxlen = field.getAttribute("xh-validate-maxlength");
+      if (minlen != null && value.length < Number(minlen)) {
+        error = customMsg || fieldName + " must be at least " + minlen + " characters";
+      }
+      if (maxlen != null && value.length > Number(maxlen)) {
+        error = customMsg || fieldName + " must be at most " + maxlen + " characters";
+      }
+
+      if (error) {
+        field.classList.add(errorClass);
+        if (errorTarget) {
+          var tgt = document.querySelector(errorTarget);
+          if (tgt) tgt.textContent = error;
+        }
+        errors.push({ field: fieldName, message: error, element: field });
+      } else {
+        field.classList.remove(errorClass);
+        if (errorTarget) {
+          var tgt2 = document.querySelector(errorTarget);
+          if (tgt2) tgt2.textContent = "";
+        }
+      }
+    }
+
+    if (errors.length > 0) {
+      emitEvent(el, "xh:validationError", { errors: errors }, false);
+      return false;
+    }
+    return true;
+  }
+
+  // ---------------------------------------------------------------------------
   // Main request handler
   // ---------------------------------------------------------------------------
 
@@ -959,12 +1358,21 @@
     var gen = (generationMap.get(el) || 0) + 1;
     generationMap.set(el, gen);
 
-    // Mark request in-flight
+    // -- Request deduplication: skip if already in-flight ---------------------
     var state = elementStates.get(el);
+    if (state && state.requestInFlight) {
+      if (config.debug) console.warn("[xhtmlx] request already in-flight, skipping");
+      return;
+    }
+
+    // Mark request in-flight
     if (state) state.requestInFlight = true;
 
-    // Interpolate URL with URI encoding
+    // Interpolate URL with URI encoding, prepend API prefix for versioning
     var url = interpolate(restInfo.url, ctx, true);
+    if (config.apiPrefix && url.indexOf("://") === -1) {
+      url = config.apiPrefix + url;
+    }
 
     // Build fetch options
     var fetchOpts = { method: restInfo.verb, headers: {} };
@@ -983,6 +1391,15 @@
       fetchOpts.body = buildRequestBody(el, ctx);
     }
 
+    // Run global plugin hooks before request
+    var hookAllowed = runHooks("beforeRequest", {
+      url: url, method: restInfo.verb, headers: fetchOpts.headers, element: el
+    });
+    if (!hookAllowed) {
+      if (state) state.requestInFlight = false;
+      return;
+    }
+
     // Emit xh:beforeRequest (cancelable)
     var allowed = emitEvent(el, "xh:beforeRequest", {
       url: url,
@@ -994,101 +1411,201 @@
       return;
     }
 
+    // Validate before sending
+    if (!validateElement(el)) {
+      if (state) state.requestInFlight = false;
+      return;
+    }
+
     // Show indicator
-    showIndicator(el);
+    var indicatorEl = showIndicator(el);
 
-    fetch(url, fetchOpts)
-      .then(function (response) {
-        // Emit xh:afterRequest
-        emitEvent(el, "xh:afterRequest", { url: url, status: response.status }, false);
+    // Accessibility: mark target as busy
+    var ariaTarget = getSwapTarget(el, false);
+    if (ariaTarget) ariaTarget.setAttribute("aria-busy", "true");
 
-        // Stale response check
-        if (generationMap.get(el) !== gen) {
-          if (config.debug) console.warn("[xhtmlx] discarding stale response for", url);
+    // xh-disabled-class: add CSS class while request is in-flight
+    var disabledClass = el.getAttribute("xh-disabled-class");
+    if (disabledClass) {
+      el.classList.add(disabledClass);
+      el.setAttribute("aria-disabled", "true");
+    }
+
+    // -- Response caching (xh-cache) ------------------------------------------
+    var cacheAttr = el.getAttribute("xh-cache");
+    var cacheKey = restInfo.verb + ":" + url;
+
+    if (cacheAttr && restInfo.verb === "GET") {
+      var cached = responseCache.get(cacheKey);
+      if (cached) {
+        var age = Date.now() - cached.timestamp;
+        var ttl = cacheAttr === "forever" ? Infinity : parseInt(cacheAttr, 10) * 1000;
+        if (age < ttl) {
+          // Use cached response — create a fake Response-like object
+          var fakeResponse = {
+            ok: true, status: 200, statusText: "OK (cached)",
+            text: function () { return Promise.resolve(cached.data); }
+          };
+          processFetchResponse(fakeResponse);
           return;
         }
+        responseCache.delete(cacheKey);
+      }
+    }
 
-        if (!response.ok) {
-          // Error path
-          return response.text().then(function (bodyText) {
-            var errorBody;
-            try {
-              errorBody = JSON.parse(bodyText);
-            } catch (_) {
-              errorBody = bodyText;
-            }
-            handleError(el, ctx, response.status, response.statusText, errorBody, templateStack);
-          });
-        }
+    // -- Retry with backoff (xh-retry) ----------------------------------------
+    var retryAttr = el.getAttribute("xh-retry");
+    var retryCount = retryAttr ? parseInt(retryAttr, 10) : 0;
+    var retryDelayAttr = el.getAttribute("xh-retry-delay");
+    var retryDelay = retryDelayAttr ? parseInt(retryDelayAttr, 10) : 1000;
 
-        // Success path — parse JSON
-        return response.text().then(function (bodyText) {
-          var jsonData;
-          if (bodyText.trim() === "") {
-            jsonData = {};
-          } else {
-            try {
-              jsonData = JSON.parse(bodyText);
-            } catch (e) {
-              console.error("[xhtmlx] invalid JSON response from", url, e);
-              handleError(el, ctx, response.status, "Invalid JSON", bodyText, templateStack);
-              return;
-            }
-          }
+    var fetchPromise = retryCount > 0
+      ? fetchWithRetry(url, fetchOpts, retryCount, retryDelay, 0, el)
+      : fetch(url, fetchOpts);
 
-          var childCtx = new DataContext(jsonData, ctx);
-
-          // Resolve and render template
-          return resolveTemplate(el, templateStack).then(function (tmpl) {
-            var swapMode = el.getAttribute("xh-swap") || config.defaultSwapMode;
-            var target = getSwapTarget(el, false);
-
-            if (tmpl.html !== null) {
-              // Render from template HTML
-              var fragment = renderTemplate(tmpl.html, childCtx);
-
-              // Emit xh:beforeSwap (cancelable)
-              var swapAllowed = emitEvent(el, "xh:beforeSwap", {
-                target: target,
-                fragment: fragment,
-                swapMode: swapMode
-              }, true);
-              if (!swapAllowed) return;
-
-              var processTarget = performSwap(target, fragment, swapMode);
-
-              // Recursively process new content
-              if (processTarget) {
-                processNode(processTarget, childCtx, tmpl.templateStack);
-              }
-
-              // Emit xh:afterSwap
-              emitEvent(el, "xh:afterSwap", { target: target }, false);
-
-            } else {
-              // Self-binding: apply bindings directly to the element
-              applyBindings(el, childCtx);
-
-              // Also process children for bindings
-              processBindingsInTree(el, childCtx);
-
-              // Emit swap events
-              emitEvent(el, "xh:afterSwap", { target: el }, false);
-            }
-
-            // Store data context on element
-            if (state) state.dataContext = childCtx;
-          });
-        });
-      })
+    fetchPromise
+      .then(processFetchResponse)
       .catch(function (err) {
         console.error("[xhtmlx] request failed:", url, err);
         handleError(el, ctx, 0, "Network Error", err.message, templateStack);
       })
       .finally(function () {
-        hideIndicator(el);
+        hideIndicator(el, indicatorEl);
+        if (ariaTarget) ariaTarget.removeAttribute("aria-busy");
+        if (disabledClass) {
+          el.classList.remove(disabledClass);
+          el.removeAttribute("aria-disabled");
+        }
         if (state) state.requestInFlight = false;
       });
+
+    function processFetchResponse(response) {
+      // Emit xh:afterRequest
+      emitEvent(el, "xh:afterRequest", { url: url, status: response.status }, false);
+
+      // Stale response check
+      if (generationMap.get(el) !== gen) {
+        if (config.debug) console.warn("[xhtmlx] discarding stale response for", url);
+        return;
+      }
+
+      if (!response.ok) {
+        // Error path
+        return response.text().then(function (bodyText) {
+          var errorBody;
+          try {
+            errorBody = JSON.parse(bodyText);
+          } catch (_) {
+            errorBody = bodyText;
+          }
+          handleError(el, ctx, response.status, response.statusText, errorBody, templateStack);
+        });
+      }
+
+      // Success path — parse JSON
+      return response.text().then(function (bodyText) {
+        var jsonData;
+        if (bodyText.trim() === "") {
+          jsonData = {};
+        } else {
+          try {
+            jsonData = JSON.parse(bodyText);
+          } catch (e) {
+            console.error("[xhtmlx] invalid JSON response from", url, e);
+            handleError(el, ctx, response.status, "Invalid JSON", bodyText, templateStack);
+            return;
+          }
+        }
+
+        // Cache the response if xh-cache is set
+        if (cacheAttr && restInfo.verb === "GET" && bodyText) {
+          responseCache.set(cacheKey, { data: bodyText, timestamp: Date.now() });
+        }
+
+        var childCtx = new MutableDataContext(jsonData, ctx);
+
+        // Resolve and render template
+        return resolveTemplate(el, templateStack).then(function (tmpl) {
+          var swapMode = el.getAttribute("xh-swap") || config.defaultSwapMode;
+          var target = getSwapTarget(el, false);
+
+          if (tmpl.html !== null) {
+            // Render from template HTML
+            var fragment = renderTemplate(tmpl.html, childCtx);
+
+            // Emit xh:beforeSwap (cancelable)
+            var swapAllowed = emitEvent(el, "xh:beforeSwap", {
+              target: target,
+              fragment: fragment,
+              swapMode: swapMode
+            }, true);
+            if (!swapAllowed) return;
+
+            var processTarget = performSwap(target, fragment, swapMode);
+
+            // Apply settle classes to newly added elements
+            applySettleClasses(processTarget);
+
+            // Recursively process new content
+            if (processTarget) {
+              processNode(processTarget, childCtx, tmpl.templateStack);
+            }
+
+            // Emit xh:afterSwap
+            emitEvent(el, "xh:afterSwap", { target: target }, false);
+
+            // -- xh-focus: focus management after swap ----------------------------
+            var focusEl = el.getAttribute("xh-focus");
+            if (focusEl && focusEl !== "auto") {
+              var toFocus = document.querySelector(focusEl);
+              if (toFocus) toFocus.focus();
+            } else if (focusEl === "auto" && processTarget) {
+              var focusable = processTarget.querySelector("a, button, input, select, textarea, [tabindex]");
+              if (focusable) focusable.focus();
+            }
+
+          } else {
+            // Self-binding: apply bindings directly to the element
+            applyBindings(el, childCtx);
+
+            // Also process children for bindings
+            processBindingsInTree(el, childCtx);
+
+            // Emit swap events
+            emitEvent(el, "xh:afterSwap", { target: el }, false);
+          }
+
+          // -- xh-push-url -------------------------------------------------------
+          var pushUrl = el.getAttribute("xh-push-url");
+          if (pushUrl) {
+            var historyUrl = pushUrl === "true" ? url : interpolate(pushUrl, childCtx, false);
+            var historyState = {
+              xhtmlx: true,
+              url: restInfo.url,
+              verb: restInfo.verb,
+              targetSel: el.getAttribute("xh-target"),
+              templateUrl: el.getAttribute("xh-template")
+            };
+            history.pushState(historyState, "", historyUrl);
+          }
+
+          // -- xh-replace-url ----------------------------------------------------
+          var replaceUrl = el.getAttribute("xh-replace-url");
+          if (replaceUrl) {
+            var rUrl = replaceUrl === "true" ? url : interpolate(replaceUrl, childCtx, false);
+            history.replaceState({ xhtmlx: true }, "", rUrl);
+          }
+
+          // Store data context and URLs for reload/versioning
+          if (state) {
+            state.dataContext = childCtx;
+            state.templateUrl = el.getAttribute("xh-template");
+            state.apiUrl = restInfo.url;
+            state.apiVerb = restInfo.verb;
+          }
+        });
+      });
+    }
   }
 
   /**
@@ -1133,9 +1650,16 @@
         if (!swapAllowed) return;
 
         var processTarget = performSwap(errorTarget, fragment, swapMode);
+
+        // Apply settle classes to newly added error elements
+        applySettleClasses(processTarget);
+
         if (processTarget) {
           processNode(processTarget, errorCtx, templateStack);
         }
+
+        // Accessibility: mark error container with role="alert"
+        errorTarget.setAttribute("role", "alert");
 
         el.classList.add(config.errorClass);
         emitEvent(el, "xh:afterSwap", { target: errorTarget, isError: true }, false);
@@ -1294,6 +1818,254 @@
   }
 
   // ---------------------------------------------------------------------------
+  // WebSocket support
+  // ---------------------------------------------------------------------------
+
+  function setupWebSocket(el, ctx, templateStack) {
+    var wsUrl = el.getAttribute("xh-ws");
+    if (!wsUrl) return;
+
+    var ws;
+    try {
+      ws = new WebSocket(wsUrl);
+    } catch (e) {
+      console.error("[xhtmlx] WebSocket connection failed:", wsUrl, e);
+      return;
+    }
+
+    var state = elementStates.get(el) || {};
+    state.ws = ws;
+    elementStates.set(el, state);
+
+    ws.addEventListener("message", function(event) {
+      var jsonData;
+      try {
+        jsonData = JSON.parse(event.data);
+      } catch (e) {
+        if (config.debug) console.warn("[xhtmlx] WebSocket message is not JSON:", event.data);
+        return;
+      }
+
+      var childCtx = new DataContext(jsonData, ctx);
+
+      resolveTemplate(el, templateStack).then(function(tmpl) {
+        if (tmpl.html !== null) {
+          var swapMode = el.getAttribute("xh-swap") || config.defaultSwapMode;
+          var target = getSwapTarget(el, false);
+          var fragment = renderTemplate(tmpl.html, childCtx);
+
+          var swapAllowed = emitEvent(el, "xh:beforeSwap", {
+            target: target, fragment: fragment, swapMode: swapMode
+          }, true);
+          if (!swapAllowed) return;
+
+          var processTarget = performSwap(target, fragment, swapMode);
+          if (processTarget) {
+            processNode(processTarget, childCtx, tmpl.templateStack);
+          }
+          emitEvent(el, "xh:afterSwap", { target: target }, false);
+        } else {
+          applyBindings(el, childCtx);
+          processBindingsInTree(el, childCtx);
+        }
+      });
+    });
+
+    ws.addEventListener("open", function() {
+      emitEvent(el, "xh:wsOpen", { url: wsUrl }, false);
+    });
+
+    ws.addEventListener("close", function(event) {
+      emitEvent(el, "xh:wsClose", { code: event.code, reason: event.reason }, false);
+      // Auto-reconnect after 3 seconds if not deliberately closed
+      if (event.code !== 1000) {
+        setTimeout(function() {
+          if (el.parentNode) setupWebSocket(el, ctx, templateStack);
+        }, 3000);
+      }
+    });
+
+    ws.addEventListener("error", function() {
+      emitEvent(el, "xh:wsError", { url: wsUrl }, false);
+    });
+  }
+
+  // For sending messages
+  function setupWsSend(el) {
+    var sendTarget = el.getAttribute("xh-ws-send");
+    if (!sendTarget) return;
+
+    el.addEventListener(el.tagName.toLowerCase() === "form" ? "submit" : "click", function(evt) {
+      evt.preventDefault();
+      var wsEl = document.querySelector(sendTarget);
+      if (!wsEl) return;
+      var wsState = elementStates.get(wsEl);
+      if (!wsState || !wsState.ws || wsState.ws.readyState !== 1) return;
+
+      var data = {};
+      var form = el.tagName.toLowerCase() === "form" ? el : el.closest("form");
+      if (form) {
+        new FormData(form).forEach(function(v, k) { data[k] = v; });
+      }
+      var vals = el.getAttribute("xh-vals");
+      if (vals) {
+        try {
+          var parsed = JSON.parse(vals);
+          for (var k in parsed) {
+            if (parsed.hasOwnProperty(k)) data[k] = parsed[k];
+          }
+        } catch(e) {
+          // ignore invalid JSON
+        }
+      }
+      wsState.ws.send(JSON.stringify(data));
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // xh-boost — enhance regular links and forms
+  // ---------------------------------------------------------------------------
+
+  function boostElement(container, ctx) {
+    // Boost links
+    var links = container.querySelectorAll("a[href]");
+    for (var i = 0; i < links.length; i++) {
+      if (links[i].hasAttribute("xh-get") || links[i].hasAttribute("data-xh-boosted")) continue;
+      boostLink(links[i], ctx);
+    }
+
+    // Boost forms
+    var forms = container.querySelectorAll("form[action]");
+    for (var j = 0; j < forms.length; j++) {
+      if (getRestVerb(forms[j]) || forms[j].hasAttribute("data-xh-boosted")) continue;
+      boostForm(forms[j], ctx);
+    }
+  }
+
+  function boostLink(link, ctx) {
+    var href = link.getAttribute("href");
+    if (!href || href.indexOf("#") === 0 || href.indexOf("javascript:") === 0 || href.indexOf("mailto:") === 0 || link.getAttribute("target") === "_blank") return;
+
+    link.setAttribute("data-xh-boosted", "");
+    link.addEventListener("click", function(e) {
+      e.preventDefault();
+      var boostContainer = link.closest("[xh-boost]");
+      var boostTarget = boostContainer.getAttribute("xh-boost-target") || "#xh-boost-content";
+      var target = document.querySelector(boostTarget);
+      if (!target) target = document.body;
+
+      showIndicator(boostContainer);
+
+      fetch(href).then(function(response) {
+        return response.text();
+      }).then(function(text) {
+        var jsonData;
+        try {
+          jsonData = JSON.parse(text);
+        } catch(e) {
+          // If not JSON, treat as HTML and swap directly
+          target.innerHTML = text;
+          processNode(target, ctx, []);
+          return;
+        }
+        var childCtx = new DataContext(jsonData, ctx);
+        var templateUrl = boostContainer.getAttribute("xh-boost-template");
+        if (templateUrl) {
+          fetchTemplate(templateUrl).then(function(html) {
+            var fragment = renderTemplate(html, childCtx);
+            target.innerHTML = "";
+            target.appendChild(fragment);
+            processNode(target, childCtx, []);
+          });
+        } else {
+          // Self-bind
+          applyBindings(target, childCtx);
+          processBindingsInTree(target, childCtx);
+        }
+      }).finally(function() {
+        hideIndicator(boostContainer);
+      });
+
+      // Push URL
+      if (typeof history !== "undefined" && history.pushState) {
+        history.pushState({ xhtmlx: true, url: href }, "", href);
+      }
+    });
+  }
+
+  function boostForm(form, ctx) {
+    var action = form.getAttribute("action");
+    var method = (form.getAttribute("method") || "GET").toUpperCase();
+    if (!action) return;
+
+    form.setAttribute("data-xh-boosted", "");
+    form.addEventListener("submit", function(e) {
+      e.preventDefault();
+      var body = {};
+      new FormData(form).forEach(function(v, k) { body[k] = v; });
+
+      var fetchOpts = { method: method, headers: {} };
+      if (method !== "GET") {
+        fetchOpts.headers["Content-Type"] = "application/json";
+        fetchOpts.body = JSON.stringify(body);
+      }
+
+      var boostContainer = form.closest("[xh-boost]");
+      var boostTarget = boostContainer.getAttribute("xh-boost-target") || "#xh-boost-content";
+      var target = document.querySelector(boostTarget);
+      if (!target) target = form;
+
+      fetch(action, fetchOpts).then(function(response) {
+        return response.text();
+      }).then(function(text) {
+        var jsonData;
+        try { jsonData = JSON.parse(text); } catch(e) { return; }
+        var childCtx = new DataContext(jsonData, ctx);
+        var templateUrl = boostContainer.getAttribute("xh-boost-template");
+        if (templateUrl) {
+          fetchTemplate(templateUrl).then(function(html) {
+            var fragment = renderTemplate(html, childCtx);
+            target.innerHTML = "";
+            target.appendChild(fragment);
+            processNode(target, childCtx, []);
+          });
+        }
+      });
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Plugin / Extension API
+  // ---------------------------------------------------------------------------
+
+  var customDirectives = []; // [{name, handler}]
+  var globalHooks = {};      // event -> [handler]
+  var transforms = {};       // name -> function
+
+  function registerDirective(name, handler) {
+    customDirectives.push({ name: name, handler: handler });
+  }
+
+  function registerHook(event, handler) {
+    if (!globalHooks[event]) globalHooks[event] = [];
+    globalHooks[event].push(handler);
+  }
+
+  function registerTransform(name, fn) {
+    transforms[name] = fn;
+  }
+
+  function runHooks(event, detail) {
+    var hooks = globalHooks[event];
+    if (!hooks) return true;
+    for (var i = 0; i < hooks.length; i++) {
+      var result = hooks[i](detail);
+      if (result === false) return false;
+    }
+    return true;
+  }
+
+  // ---------------------------------------------------------------------------
   // Core processing loop
   // ---------------------------------------------------------------------------
 
@@ -1336,48 +2108,70 @@
    * @returns {Element[]}
    */
   function gatherXhElements(root) {
-    // We need a comprehensive selector for any element with xh-* attributes
-    var selectors = [
-      "[xh-get]", "[xh-post]", "[xh-put]", "[xh-delete]", "[xh-patch]",
-      "[xh-text]", "[xh-html]", "[xh-each]", "[xh-if]", "[xh-unless]",
-      "[xh-trigger]", "[xh-template]", "[xh-target]", "[xh-swap]",
-      "[xh-indicator]", "[xh-vals]", "[xh-headers]",
-      "[xh-error-template]", "[xh-error-target]"
-    ];
-
-    // Also match xh-attr-* and xh-error-template-*
     var results = [];
-    var all;
-    try {
-      all = root.querySelectorAll(selectors.join(","));
-    } catch (_) {
-      all = root.querySelectorAll("*");
-    }
-
     var seen = new Set();
-    for (var i = 0; i < all.length; i++) {
-      if (!seen.has(all[i])) {
-        seen.add(all[i]);
-        results.push(all[i]);
-      }
-    }
+    var all = root.querySelectorAll("*");
 
-    // Also check for xh-attr-* elements (they won't match the fixed selectors)
-    var allEls = root.querySelectorAll("*");
-    for (var j = 0; j < allEls.length; j++) {
-      if (seen.has(allEls[j])) continue;
-      var attrs = allEls[j].attributes;
-      for (var k = 0; k < attrs.length; k++) {
-        if (attrs[k].name.indexOf("xh-attr-") === 0 ||
-            attrs[k].name.indexOf("xh-error-template-") === 0) {
-          results.push(allEls[j]);
-          seen.add(allEls[j]);
-          break;
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      var attrs = el.attributes;
+      for (var j = 0; j < attrs.length; j++) {
+        if (attrs[j].name.indexOf("xh-") === 0) {
+          if (!seen.has(el)) {
+            seen.add(el);
+            results.push(el);
+          }
+          break; // Found one xh- attr, no need to check more on this element
         }
       }
     }
 
     return results;
+  }
+
+  // ---------------------------------------------------------------------------
+  // xh-on-* event handler helper
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Attach a declarative event handler for xh-on-{event} directives.
+   *
+   * @param {Element} el        – The element to attach the handler to.
+   * @param {string}  event     – The DOM event name (e.g. "click", "dblclick").
+   * @param {string}  actionStr – The action string (e.g. "toggleClass:active").
+   */
+  function attachOnHandler(el, event, actionStr) {
+    var parts = actionStr.split(":");
+    var action = parts[0];
+    var arg = parts.slice(1).join(":");
+
+    el.addEventListener(event, function(_evt) {
+      switch (action) {
+        case "toggleClass":
+          el.classList.toggle(arg);
+          break;
+        case "addClass":
+          el.classList.add(arg);
+          break;
+        case "removeClass":
+          el.classList.remove(arg);
+          break;
+        case "remove":
+          el.remove();
+          break;
+        case "toggle":
+          var target = document.querySelector(arg);
+          if (target) {
+            target.style.display = target.style.display === "none" ? "" : "none";
+          }
+          break;
+        case "dispatch":
+          el.dispatchEvent(new CustomEvent(arg, { bubbles: true, detail: {} }));
+          break;
+        default:
+          if (config.debug) console.warn("[xhtmlx] unknown xh-on action:", action);
+      }
+    });
   }
 
   /**
@@ -1393,6 +2187,52 @@
     // (e.g. MutationObserver + explicit process() call)
     var existing = elementStates.get(el);
     if (existing && existing.processed) return;
+
+    // -- xh-on-* event handlers -----------------------------------------------
+    var onAttrs = [];
+    for (var oa = 0; oa < el.attributes.length; oa++) {
+      if (el.attributes[oa].name.indexOf("xh-on-") === 0) {
+        onAttrs.push({
+          event: el.attributes[oa].name.slice(6),
+          action: el.attributes[oa].value
+        });
+      }
+    }
+    for (var ob = 0; ob < onAttrs.length; ob++) {
+      attachOnHandler(el, onAttrs[ob].event, onAttrs[ob].action);
+    }
+
+    // -- i18n support -----------------------------------------------------------
+    if (el.hasAttribute("xh-i18n") || checkElementForI18nAttr(el)) {
+      applyI18n(el);
+    }
+
+    if (el.hasAttribute("xh-ws")) {
+      setupWebSocket(el, ctx, templateStack);
+      var wState = elementStates.get(el) || {};
+      wState.processed = true;
+      elementStates.set(el, wState);
+    }
+    if (el.hasAttribute("xh-ws-send")) {
+      setupWsSend(el);
+    }
+
+    if (el.hasAttribute("xh-boost")) {
+      boostElement(el, ctx);
+      var boostState = elementStates.get(el) || {};
+      boostState.processed = true;
+      elementStates.set(el, boostState);
+    }
+
+    // Accessibility: auto-set aria-live on xh-target elements
+    var targetSel = el.getAttribute("xh-target");
+    if (targetSel) {
+      var ariaLiveTarget = document.querySelector(targetSel);
+      if (ariaLiveTarget && !ariaLiveTarget.hasAttribute("aria-live")) {
+        var ariaLive = el.getAttribute("xh-aria-live") || "polite";
+        ariaLiveTarget.setAttribute("aria-live", ariaLive);
+      }
+    }
 
     var restInfo = getRestVerb(el);
 
@@ -1486,6 +2326,238 @@
     return false;
   }
 
+  /**
+   * Check if an element has any xh-i18n-{attr} attribute (not xh-i18n-vars).
+   * @param {Element} el
+   * @returns {boolean}
+   */
+  function checkElementForI18nAttr(el) {
+    if (!el.attributes) return false;
+    for (var i = 0; i < el.attributes.length; i++) {
+      var name = el.attributes[i].name;
+      if (name.indexOf("xh-i18n-") === 0 && name !== "xh-i18n-vars") return true;
+    }
+    return false;
+  }
+
+  // ---------------------------------------------------------------------------
+  // i18n — Internationalization support
+  // ---------------------------------------------------------------------------
+
+  var i18n = {
+    _locales: {},
+    _locale: null,
+    _fallback: "en",
+
+    load: function(locale, translations) {
+      i18n._locales[locale] = i18n._locales[locale] || {};
+      for (var k in translations) {
+        if (translations.hasOwnProperty(k)) {
+          i18n._locales[locale][k] = translations[k];
+        }
+      }
+    },
+
+    get locale() { return i18n._locale || i18n._fallback; },
+    set locale(val) {
+      i18n._locale = val;
+      if (typeof document !== "undefined") {
+        applyI18n(document.body);
+        emitEvent(document.body, "xh:localeChanged", { locale: val }, false);
+      }
+    },
+
+    t: function(key, vars) {
+      var locales = [i18n._locale, i18n._fallback];
+      for (var l = 0; l < locales.length; l++) {
+        if (!locales[l]) continue;
+        var dict = i18n._locales[locales[l]];
+        if (dict && dict[key] != null) {
+          var text = String(dict[key]);
+          if (vars) {
+            for (var v in vars) {
+              if (vars.hasOwnProperty(v)) {
+                text = text.replace(new RegExp("\\{" + v + "\\}", "g"), vars[v]);
+              }
+            }
+          }
+          return text;
+        }
+      }
+      return key; // fallback to key itself
+    }
+  };
+
+  /**
+   * Apply i18n translations to elements with xh-i18n and xh-i18n-{attr} attributes.
+   *
+   * @param {Element} root – The root element to scan.
+   */
+  function applyI18n(root) {
+    var els = root.querySelectorAll("[xh-i18n]");
+    for (var i = 0; i < els.length; i++) {
+      var key = els[i].getAttribute("xh-i18n");
+      var vars = els[i].getAttribute("xh-i18n-vars");
+      var parsedVars = null;
+      if (vars) {
+        try { parsedVars = JSON.parse(vars); } catch(e) { /* ignore */ }
+      }
+      els[i].textContent = i18n.t(key, parsedVars);
+    }
+
+    // xh-i18n-{attr} for attribute translations
+    var all = root.querySelectorAll("*");
+    for (var j = 0; j < all.length; j++) {
+      var attrs = all[j].attributes;
+      for (var a = 0; a < attrs.length; a++) {
+        var name = attrs[a].name;
+        if (name.indexOf("xh-i18n-") === 0 && name !== "xh-i18n-vars") {
+          var targetAttr = name.slice(8);
+          var attrKey = attrs[a].value;
+          all[j].setAttribute(targetAttr, i18n.t(attrKey));
+        }
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // SPA Router
+  // ---------------------------------------------------------------------------
+
+  var router = {
+    _routes: [],
+    _outlet: null,
+    _activeLink: null,
+    _activeClass: "xh-route-active",
+    _notFoundTemplate: null,
+
+    _init: function() {
+      // Scan for xh-router containers
+      if (typeof document === "undefined") return;
+      var containers = document.querySelectorAll("[xh-router]");
+      for (var c = 0; c < containers.length; c++) {
+        var outlet = containers[c].getAttribute("xh-router-outlet") || "#router-outlet";
+        router._outlet = document.querySelector(outlet);
+
+        var links = containers[c].querySelectorAll("[xh-route]");
+        for (var l = 0; l < links.length; l++) {
+          var link = links[l];
+          var route = {
+            path: link.getAttribute("xh-route"),
+            template: link.getAttribute("xh-template"),
+            api: link.getAttribute("xh-get"),
+            element: link,
+            regex: null,
+            paramNames: []
+          };
+
+          // Convert path pattern to regex: /users/:id -> /users/([^/]+)
+          var paramNames = [];
+          var regexStr = route.path.replace(/:([^/]+)/g, function(_, name) {
+            paramNames.push(name);
+            return "([^/]+)";
+          });
+          route.regex = new RegExp("^" + regexStr + "$");
+          route.paramNames = paramNames;
+          router._routes.push(route);
+
+          // Click handler
+          (function(r) {
+            r.element.addEventListener("click", function(e) {
+              e.preventDefault();
+              router.navigate(r.path);
+            });
+          })(route);
+        }
+
+        // 404 fallback
+        var notFound = containers[c].getAttribute("xh-router-404");
+        if (notFound) router._notFoundTemplate = notFound;
+      }
+
+      // Handle popstate for back/forward
+      window.addEventListener("popstate", function() {
+        router._resolve(window.location.pathname);
+      });
+
+      // Resolve current URL on init
+      if (router._routes.length > 0) {
+        router._resolve(window.location.pathname);
+      }
+    },
+
+    navigate: function(path) {
+      history.pushState({ xhtmlx: true, route: path }, "", path);
+      router._resolve(path);
+    },
+
+    _resolve: function(path) {
+      if (!router._outlet) return;
+
+      for (var i = 0; i < router._routes.length; i++) {
+        var route = router._routes[i];
+        var match = path.match(route.regex);
+        if (match) {
+          // Extract params
+          var params = {};
+          for (var p = 0; p < route.paramNames.length; p++) {
+            params[route.paramNames[p]] = match[p + 1];
+          }
+
+          // Update active class
+          if (router._activeLink) {
+            router._activeLink.classList.remove(router._activeClass);
+          }
+          route.element.classList.add(router._activeClass);
+          router._activeLink = route.element;
+
+          // Fetch data and render
+          var ctx = new DataContext(params);
+
+          if (route.api) {
+            var url = interpolate(route.api, ctx, true);
+            fetch(url).then(function(r) { return r.text(); }).then(function(text) {
+              var data;
+              try { data = JSON.parse(text); } catch(e) { data = {}; }
+              var childCtx = new DataContext(data, ctx);
+
+              if (route.template) {
+                fetchTemplate(route.template).then(function(html) {
+                  var fragment = renderTemplate(html, childCtx);
+                  router._outlet.innerHTML = "";
+                  router._outlet.appendChild(fragment);
+                  processNode(router._outlet, childCtx, []);
+                });
+              }
+            });
+          } else if (route.template) {
+            fetchTemplate(route.template).then(function(html) {
+              var fragment = renderTemplate(html, ctx);
+              router._outlet.innerHTML = "";
+              router._outlet.appendChild(fragment);
+              processNode(router._outlet, ctx, []);
+            });
+          }
+
+          emitEvent(router._outlet, "xh:routeChanged", { path: path, params: params }, false);
+          return;
+        }
+      }
+
+      // 404
+      if (router._notFoundTemplate) {
+        var ctx404 = new DataContext({ path: path });
+        fetchTemplate(router._notFoundTemplate).then(function(html) {
+          var fragment = renderTemplate(html, ctx404);
+          router._outlet.innerHTML = "";
+          router._outlet.appendChild(fragment);
+        });
+      }
+
+      emitEvent(document.body, "xh:routeNotFound", { path: path }, false);
+    }
+  };
+
   // ---------------------------------------------------------------------------
   // Public API
   // ---------------------------------------------------------------------------
@@ -1522,6 +2594,13 @@
     },
 
     /**
+     * Clear the response cache.
+     */
+    clearResponseCache: function () {
+      responseCache.clear();
+    },
+
+    /**
      * Interpolate a string using a data context.
      * @param {string}      str
      * @param {DataContext}  ctx
@@ -1532,12 +2611,85 @@
       return interpolate(str, ctx, !!uriEncode);
     },
 
+    /** Register a custom directive processed in applyBindings. */
+    directive: registerDirective,
+
+    /** Register a global hook (e.g. "beforeRequest"). */
+    hook: registerHook,
+
+    /** Register a named transform for pipe syntax in bindings. */
+    transform: registerTransform,
+
+    /**
+     * Switch UI version. Sets template and API prefixes, clears all caches.
+     * Version can be any string: "v2", "abc123", "20260315", a git SHA, etc.
+     *
+     * @param {string}  version     – Version identifier.
+     * @param {Object}  [opts]      – Options.
+     * @param {string}  [opts.templatePrefix] – Template prefix. Defaults to "/ui/{version}".
+     * @param {string}  [opts.apiPrefix]      – API prefix. Defaults to "" (unchanged).
+     * @param {boolean} [opts.reload]         – Re-render all active widgets. Defaults to true.
+     */
+    switchVersion: function (version, opts) {
+      opts = opts || {};
+      config.uiVersion = version;
+      config.templatePrefix = opts.templatePrefix != null ? opts.templatePrefix : "/ui/" + version;
+      config.apiPrefix = opts.apiPrefix != null ? opts.apiPrefix : config.apiPrefix;
+      templateCache.clear();
+      responseCache.clear();
+
+      if (typeof document !== "undefined") {
+        emitEvent(document.body, "xh:versionChanged", {
+          version: version,
+          templatePrefix: config.templatePrefix,
+          apiPrefix: config.apiPrefix
+        }, false);
+      }
+
+      if (opts.reload !== false) {
+        this.reload();
+      }
+    },
+
+    /**
+     * Re-render all active widgets, or only those using a specific template.
+     * Re-fetches data from API and re-renders with (possibly new) templates.
+     *
+     * @param {string} [templateUrl] – If provided, only reload widgets using this template.
+     */
+    reload: function (templateUrl) {
+      if (typeof document === "undefined") return;
+      var allEls = gatherXhElements(document.body);
+      for (var i = 0; i < allEls.length; i++) {
+        var el = allEls[i];
+        var st = elementStates.get(el);
+        if (!st || !st.apiUrl) continue;
+        if (templateUrl && st.templateUrl !== templateUrl) continue;
+        // Reset processed flag so element can be re-triggered
+        st.processed = false;
+        elementStates.set(el, st);
+        // Re-execute the request
+        var restInfo = getRestVerb(el);
+        if (restInfo) {
+          var ctx = st.dataContext || new DataContext({});
+          executeRequest(el, ctx, []);
+        }
+      }
+    },
+
+    /** i18n module for internationalization support */
+    i18n: i18n,
+
+    /** SPA Router */
+    router: router,
+
     /** Internal version string */
-    version: "0.1.0",
+    version: "0.2.0",
 
     // --- Internals exposed for testing (not part of the public API) ----------
     _internals: {
       DataContext: DataContext,
+      MutableDataContext: MutableDataContext,
       interpolate: interpolate,
       parseTrigger: parseTrigger,
       parseTimeValue: parseTimeValue,
@@ -1545,6 +2697,9 @@
       applyBindings: applyBindings,
       processEach: processEach,
       processBindingsInTree: processBindingsInTree,
+      processElement: processElement,
+      attachOnHandler: attachOnHandler,
+      executeRequest: executeRequest,
       resolveErrorTemplate: resolveErrorTemplate,
       findErrorBoundary: findErrorBoundary,
       getRestVerb: getRestVerb,
@@ -1556,9 +2711,28 @@
       defaultTrigger: defaultTrigger,
       resolveDot: resolveDot,
       templateCache: templateCache,
+      responseCache: responseCache,
       elementStates: elementStates,
       generationMap: generationMap,
-      config: config
+      fetchWithRetry: fetchWithRetry,
+      applySettleClasses: applySettleClasses,
+      setupWebSocket: setupWebSocket,
+      setupWsSend: setupWsSend,
+      boostElement: boostElement,
+      boostLink: boostLink,
+      boostForm: boostForm,
+      customDirectives: customDirectives,
+      globalHooks: globalHooks,
+      transforms: transforms,
+      runHooks: runHooks,
+      registerDirective: registerDirective,
+      registerHook: registerHook,
+      registerTransform: registerTransform,
+      config: config,
+      validateElement: validateElement,
+      applyI18n: applyI18n,
+      i18n: i18n,
+      router: router
     }
   };
 
@@ -1580,6 +2754,38 @@
       var rootCtx = new DataContext({});
       processNode(document.body, rootCtx, []);
       setupMutationObserver(rootCtx);
+      router._init();
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // popstate listener — browser history back/forward (xh-push-url support)
+  // ---------------------------------------------------------------------------
+
+  if (typeof window !== "undefined") {
+    window.addEventListener("popstate", function (e) {
+      if (e.state && e.state.xhtmlx && e.state.url) {
+        var target = e.state.targetSel ? document.querySelector(e.state.targetSel) : document.body;
+        if (target) {
+          fetch(e.state.url).then(function (r) { return r.text(); }).then(function (text) {
+            var data;
+            try {
+              data = JSON.parse(text);
+            } catch (_) {
+              return;
+            }
+            var ctx = new DataContext(data);
+            if (e.state.templateUrl) {
+              fetchTemplate(e.state.templateUrl).then(function (html) {
+                var fragment = renderTemplate(html, ctx);
+                target.innerHTML = "";
+                target.appendChild(fragment);
+                processNode(target, ctx, []);
+              });
+            }
+          }).catch(function () {});
+        }
+      }
     });
   }
 
