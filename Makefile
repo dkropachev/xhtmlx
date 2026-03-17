@@ -39,16 +39,16 @@ lint-fix: ## Run ESLint with auto-fix
 test: test-unit ## Run unit tests (default)
 
 test-unit: ## Run unit tests (jest)
-	npx jest tests/unit --verbose
+	npx jest tests/unit --verbose --forceExit
 
 test-integration: ## Run integration tests (jest)
-	npx jest tests/integration --verbose
+	npx jest tests/integration --verbose --forceExit
 
 test-browser: ## Run browser tests (Playwright + Chromium)
 	npx playwright test
 
 test-all: ## Run all tests: unit + integration + browser
-	npx jest --verbose
+	npx jest --verbose --forceExit
 	npx playwright test
 
 test-watch: ## Run jest tests in watch mode
