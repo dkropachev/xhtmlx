@@ -2810,14 +2810,20 @@
   // ---------------------------------------------------------------------------
 
   if (typeof document !== "undefined" && document.addEventListener) {
-    document.addEventListener("DOMContentLoaded", function () {
+    function autoInit() {
       injectDefaultCSS();
       scanNamedTemplates();
       var rootCtx = new DataContext({});
       processNode(document.body, rootCtx, []);
       setupMutationObserver(rootCtx);
       router._init();
-    });
+    }
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", autoInit);
+    } else {
+      autoInit();
+    }
   }
 
   // ---------------------------------------------------------------------------
