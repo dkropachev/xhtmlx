@@ -25,7 +25,8 @@
     defaultErrorTarget: null,   // Global fallback error target CSS selector
     templatePrefix: "",         // Prefix prepended to all xh-template URLs
     apiPrefix: "",              // Prefix prepended to all REST verb URLs
-    uiVersion: null             // Current UI version identifier (any string)
+    uiVersion: null,            // Current UI version identifier (any string)
+    cspSafe: false              // When true, avoid innerHTML for CSP compliance
   };
 
   // ---------------------------------------------------------------------------
@@ -56,14 +57,27 @@
   function injectDefaultCSS() {
     var id = "xhtmlx-default-css";
     if (document.getElementById(id)) return;
-    var style = document.createElement("style");
-    style.id = id;
-    style.textContent =
+
+    var cssText =
       ".xh-indicator { opacity: 0; transition: opacity 200ms ease-in; }\n" +
       ".xh-request .xh-indicator, .xh-request.xh-indicator { opacity: 1; }\n" +
       ".xh-added { }\n" +
       ".xh-settled { }\n" +
       ".xh-invalid { border-color: #ef4444; }\n";
+
+    if (config.cspSafe && document.adoptedStyleSheets !== undefined) {
+      var sheet = new CSSStyleSheet();
+      sheet.replaceSync(cssText);
+      document.adoptedStyleSheets = [].concat(
+        Array.prototype.slice.call(document.adoptedStyleSheets),
+        [sheet]
+      );
+      return;
+    }
+
+    var style = document.createElement("style");
+    style.id = id;
+    style.textContent = cssText;
     document.head.appendChild(style);
   }
 
@@ -450,14 +464,19 @@
     var htmlAttr = el.getAttribute("xh-html");
     if (htmlAttr != null) {
       var hv = ctx.resolve(htmlAttr);
-      el.innerHTML = hv != null ? String(hv) : "";
-      if (ctx instanceof MutableDataContext) {
-        (function(field, element, context) {
-          context.subscribe(field, function() {
-            var newVal = context.resolve(field);
-            element.innerHTML = newVal != null ? String(newVal) : "";
-          });
-        })(htmlAttr, el, ctx);
+      if (config.cspSafe) {
+        if (config.debug) console.warn("[xhtmlx] xh-html is disabled in CSP-safe mode, falling back to xh-text");
+        el.textContent = hv != null ? String(hv) : "";
+      } else {
+        el.innerHTML = hv != null ? String(hv) : "";
+        if (ctx instanceof MutableDataContext) {
+          (function(field, element, context) {
+            context.subscribe(field, function() {
+              var newVal = context.resolve(field);
+              element.innerHTML = newVal != null ? String(newVal) : "";
+            });
+          })(htmlAttr, el, ctx);
+        }
       }
     }
 
@@ -1055,7 +1074,11 @@
     switch (mode) {
       case "innerHTML":
         cleanupBeforeSwap(target, false);
-        target.innerHTML = "";
+        if (config.cspSafe) {
+          while (target.firstChild) target.removeChild(target.firstChild);
+        } else {
+          target.innerHTML = "";
+        }
         target.appendChild(fragment);
         return target;
 
@@ -1128,15 +1151,27 @@
   function renderTemplate(html, ctx) {
     // 1. Parse into fragment (no global interpolation — that would replace
     //    {{field}} inside xh-* attributes with the wrong context)
-    var tpl = document.createElement("template");
-    tpl.innerHTML = html;
-    var fragment = document.importNode(tpl.content, true);
+    var container = document.createElement("div");
+
+    var parsedFragment;
+    if (config.cspSafe) {
+      var parser = new DOMParser();
+      var doc = parser.parseFromString("<body>" + html + "</body>", "text/html");
+      parsedFragment = document.createDocumentFragment();
+      var children = Array.prototype.slice.call(doc.body.childNodes);
+      for (var c = 0; c < children.length; c++) {
+        parsedFragment.appendChild(document.importNode(children[c], true));
+      }
+    } else {
+      var tpl = document.createElement("template");
+      tpl.innerHTML = html;
+      parsedFragment = document.importNode(tpl.content, true);
+    }
+    container.appendChild(parsedFragment);
 
     // 2. Process directives in the fragment
     // We need a temporary container because DocumentFragment doesn't support
     // querySelectorAll with :scope or certain traversals in all browsers.
-    var container = document.createElement("div");
-    container.appendChild(fragment);
 
     // 2a. Interpolate {{field}} in text nodes and non-xh-* attributes only.
     //     This leaves xh-get URLs, xh-text values, etc. for later processing
@@ -2601,6 +2636,13 @@
     },
 
     /**
+     * Scan for <template xh-name="..."> and populate template cache.
+     * Called automatically on DOMContentLoaded. Call manually after
+     * dynamically adding named templates.
+     */
+    scanNamedTemplates: scanNamedTemplates,
+
+    /**
      * Interpolate a string using a data context.
      * @param {string}      str
      * @param {DataContext}  ctx
@@ -2706,6 +2748,7 @@
       performSwap: performSwap,
       buildRequestBody: buildRequestBody,
       fetchTemplate: fetchTemplate,
+      scanNamedTemplates: scanNamedTemplates,
       resolveTemplate: resolveTemplate,
       getSwapTarget: getSwapTarget,
       defaultTrigger: defaultTrigger,
@@ -2732,7 +2775,8 @@
       validateElement: validateElement,
       applyI18n: applyI18n,
       i18n: i18n,
-      router: router
+      router: router,
+      injectDefaultCSS: injectDefaultCSS
     }
   };
 
@@ -2745,17 +2789,41 @@
   }
 
   // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // Named template scanning — <template xh-name="/path"> → cache
+  // ---------------------------------------------------------------------------
+
+  function scanNamedTemplates() {
+    if (typeof document === "undefined") return;
+    var named = document.querySelectorAll("template[xh-name]");
+    for (var i = 0; i < named.length; i++) {
+      var name = named[i].getAttribute("xh-name");
+      if (name) {
+        var prefixedName = config.templatePrefix ? config.templatePrefix + name : name;
+        templateCache.set(prefixedName, Promise.resolve(named[i].innerHTML));
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Auto-init on DOMContentLoaded (browser only)
   // ---------------------------------------------------------------------------
 
   if (typeof document !== "undefined" && document.addEventListener) {
-    document.addEventListener("DOMContentLoaded", function () {
+    function autoInit() {
       injectDefaultCSS();
+      scanNamedTemplates();
       var rootCtx = new DataContext({});
       processNode(document.body, rootCtx, []);
       setupMutationObserver(rootCtx);
       router._init();
-    });
+    }
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", autoInit);
+    } else {
+      autoInit();
+    }
   }
 
   // ---------------------------------------------------------------------------
