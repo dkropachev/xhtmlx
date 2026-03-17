@@ -16,7 +16,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "jest --verbose",
+    "test": "jest --verbose --forceExit",
     "test:unit": "jest tests/unit --verbose",
     "test:integration": "jest tests/integration --verbose",
     "test:browser": "npx playwright test",
@@ -28,7 +28,8 @@
     "examples": "node examples/server.js"
   },
   "jest": {
-    "testPathIgnorePatterns": ["/node_modules/", "/tests/browser/"]
+    "testPathIgnorePatterns": ["/node_modules/", "/tests/browser/"],
+    "forceExit": true
   },
   "keywords": [
     "htmx",

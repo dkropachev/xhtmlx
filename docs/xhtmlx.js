@@ -1287,6 +1287,19 @@
    *
    * @param {Element} processTarget – The container of new elements.
    */
+  /**
+   * Mark all elements in a DocumentFragment as owned by xhtmlx so that
+   * MutationObserver skips them (they'll be processed via processNode
+   * with the correct data context instead of the root context).
+   */
+  function markFragmentOwned(fragment) {
+    if (!fragment || !fragment.querySelectorAll) return;
+    var els = fragment.querySelectorAll("*");
+    for (var i = 0; i < els.length; i++) {
+      els[i].setAttribute("data-xh-owned", "");
+    }
+  }
+
   function applySettleClasses(processTarget) {
     if (!processTarget) return;
     var newEls = processTarget.querySelectorAll ? Array.prototype.slice.call(processTarget.querySelectorAll("*")) : [];
@@ -1296,8 +1309,9 @@
       if (newEls[se].classList) newEls[se].classList.add("xh-added");
     }
 
-    requestAnimationFrame(function () {
-      requestAnimationFrame(function () {
+    var raf = typeof requestAnimationFrame === "function" ? requestAnimationFrame : function(fn) { setTimeout(fn, 16); };
+    raf(function () {
+      raf(function () {
         for (var sf = 0; sf < newEls.length; sf++) {
           if (newEls[sf].classList) {
             newEls[sf].classList.remove("xh-added");
@@ -1632,12 +1646,14 @@
             }, true);
             if (!swapAllowed) return;
 
+            // Mark fragment children so MutationObserver skips them
+            markFragmentOwned(fragment);
             var processTarget = performSwap(target, fragment, swapMode);
 
             // Apply settle classes to newly added elements
             applySettleClasses(processTarget);
 
-            // Recursively process new content
+            // Recursively process new content with correct data context
             if (processTarget) {
               processNode(processTarget, childCtx, tmpl.templateStack);
             }
@@ -1740,6 +1756,7 @@
         }, true);
         if (!swapAllowed) return;
 
+        markFragmentOwned(fragment);
         var processTarget = performSwap(errorTarget, fragment, swapMode);
 
         // Apply settle classes to newly added error elements
@@ -1966,6 +1983,7 @@
           }, true);
           if (!swapAllowed) return;
 
+          markFragmentOwned(fragment);
           var processTarget = performSwap(target, fragment, swapMode);
           if (processTarget) {
             processNode(processTarget, childCtx, tmpl.templateStack);
@@ -2387,6 +2405,10 @@
         for (var n = 0; n < added.length; n++) {
           var node = added[n];
           if (node.nodeType !== 1) continue; // Element nodes only
+
+          // Skip nodes inserted by xhtmlx swap/render (they are processed
+          // via processNode with the correct data context, not root context)
+          if (node.hasAttribute && node.hasAttribute("data-xh-owned")) continue;
 
           // Check if this node or any descendant has xh-* attributes
           var hasXh = hasXhAttributes(node);
