@@ -181,20 +181,20 @@
     if (parts[0] === "$parent") {
       if (!this.parent) return undefined;
       if (parts.length === 1) return this.parent.data;
-      return this.parent.resolve(parts.slice(1).join("."));
+      return this.parent._resolveFromParts(parts, 1);
     }
 
     if (parts[0] === "$root") {
       var root = this;
       while (root.parent) root = root.parent;
       if (parts.length === 1) return root.data;
-      return root.resolve(parts.slice(1).join("."));
+      return root._resolveFromParts(parts, 1);
     }
 
     if (parts[0] === "$viewport") {
       var vp = getViewportContext();
       if (parts.length === 1) return vp;
-      return resolveDot(vp, parts.slice(1));
+      return resolveDot(vp, parts, 1);
     }
 
     // --- local lookup --------------------------------------------------------
@@ -208,14 +208,58 @@
   };
 
   /**
+   * Resolve using pre-split parts starting from a given index.
+   * Avoids intermediate array/string allocation from slice+join.
+   *
+   * @param {string[]} parts    – The full parts array.
+   * @param {number}   startIdx – Index to start resolving from.
+   * @returns {*}
+   */
+  DataContext.prototype._resolveFromParts = function (parts, startIdx) {
+    // Handle chained special variables: $parent.$parent.name
+    if (startIdx < parts.length && parts[startIdx] === "$parent") {
+      if (!this.parent) return undefined;
+      if (startIdx === parts.length - 1) return this.parent.data;
+      return this.parent._resolveFromParts(parts, startIdx + 1);
+    }
+
+    if (startIdx < parts.length && parts[startIdx] === "$root") {
+      var root = this;
+      while (root.parent) root = root.parent;
+      if (startIdx === parts.length - 1) return root.data;
+      return root._resolveFromParts(parts, startIdx + 1);
+    }
+
+    if (startIdx < parts.length && parts[startIdx] === "$index") {
+      return this.index;
+    }
+
+    if (startIdx < parts.length && parts[startIdx] === "$viewport") {
+      var vp = getViewportContext();
+      if (startIdx === parts.length - 1) return vp;
+      return resolveDot(vp, parts, startIdx + 1);
+    }
+
+    // Normal dotted path from startIdx onward
+    var value = resolveDot(this.data, parts, startIdx);
+    if (value !== undefined) return value;
+
+    // Walk parent chain with the remaining path
+    if (this.parent) return this.parent._resolveFromParts(parts, startIdx);
+
+    return undefined;
+  };
+
+  /**
    * Resolve a dotted path against a plain object.
    * @param {Object} obj
    * @param {string[]} parts
+   * @param {number} [startIdx=0] – Index to start resolving from (avoids slice+join).
    * @returns {*}
    */
-  function resolveDot(obj, parts) {
+  function resolveDot(obj, parts, startIdx) {
     var cur = obj;
-    for (var i = 0; i < parts.length; i++) {
+    for (var i = startIdx || 0; i < parts.length; i++) {
       if (cur == null || typeof cur !== "object") return undefined;
       if (!(parts[i] in cur)) return undefined;
       cur = cur[parts[i]];
@@ -691,22 +735,26 @@
 
     var fragment = document.createDocumentFragment();
 
+    var ItemCtxClass = (ctx instanceof MutableDataContext) ? MutableDataContext : DataContext;
+
     var renderItem = function (item, idx) {
       var clone = el.cloneNode(true);
-      // Mark clone so renderTemplate's second pass doesn't rebind with wrong context
+      // Mark only the clone root — descendants are detected via closest() in renderTemplate
       clone.setAttribute("data-xh-each-item", "");
-      // Also mark descendants so renderTemplate can use hasAttribute instead of closest()
-      var cloneDesc = clone.querySelectorAll("*");
-      for (var cd = 0; cd < cloneDesc.length; cd++) {
-        cloneDesc[cd].setAttribute("data-xh-each-item", "");
-      }
-      var ItemCtxClass = (ctx instanceof MutableDataContext) ? MutableDataContext : DataContext;
       var itemCtx = new ItemCtxClass(item, ctx, idx);
       applyBindings(clone, itemCtx);
-      // Process children bindings
-      processBindingsInTree(clone, itemCtx);
-      // Recursively process for nested REST verb elements
-      processNode(clone, itemCtx);
+      // Handle xh-on-* event handlers on the clone root itself
+      for (var oa = 0; oa < clone.attributes.length; oa++) {
+        if (clone.attributes[oa].name.indexOf("xh-on-") === 0) {
+          attachOnHandler(clone, clone.attributes[oa].name.slice(6), clone.attributes[oa].value);
+        }
+      }
+      // Mark clone root as processed to prevent re-processing by processNode
+      var cloneState = elementStates.get(clone) || {};
+      cloneState.processed = true;
+      elementStates.set(clone, cloneState);
+      // Single combined pass: apply bindings + process REST verb elements
+      processEachCloneChildren(clone, itemCtx);
       fragment.appendChild(clone);
     };
 
@@ -727,14 +775,9 @@
         for (var b = offset; b < end; b++) {
           var clone = el.cloneNode(true);
           clone.setAttribute("data-xh-each-item", "");
-          var cloneDesc = clone.querySelectorAll("*");
-          for (var cd = 0; cd < cloneDesc.length; cd++) {
-            cloneDesc[cd].setAttribute("data-xh-each-item", "");
-          }
-          var itemCtx = new (ctx instanceof MutableDataContext ? MutableDataContext : DataContext)(arr[b], ctx, b);
+          var itemCtx = new ItemCtxClass(arr[b], ctx, b);
           applyBindings(clone, itemCtx);
-          processBindingsInTree(clone, itemCtx);
-          processNode(clone, itemCtx);
+          processEachCloneChildren(clone, itemCtx);
           batchFragment.appendChild(clone);
         }
         // Insert after the last inserted batch
@@ -786,6 +829,57 @@
 
       // Apply simple bindings
       applyBindings(el, ctx);
+    }
+  }
+
+  /**
+   * Combined processing pass for xh-each clone children.
+   * Merges processBindingsInTree + processNode into a single querySelectorAll
+   * to avoid 2+ full DOM scans per cloned item.
+   *
+   * @param {Element}     root – The cloned element.
+   * @param {DataContext}  ctx  – Per-item data context.
+   */
+  function processEachCloneChildren(root, ctx) {
+    var elements = Array.prototype.slice.call(root.querySelectorAll("*"));
+    for (var i = 0; i < elements.length; i++) {
+      var el = elements[i];
+      if (!el.parentNode) continue;
+
+      // xh-each (nested iterations)
+      if (el.hasAttribute("xh-each")) {
+        processEach(el, ctx);
+        continue;
+      }
+
+      // Apply bindings (xh-text, xh-html, xh-attr-*, xh-if, etc.)
+      var kept = applyBindings(el, ctx);
+
+      if (kept) {
+        // Check for xh-on-* event handlers
+        for (var oa = 0; oa < el.attributes.length; oa++) {
+          if (el.attributes[oa].name.indexOf("xh-on-") === 0) {
+            attachOnHandler(el, el.attributes[oa].name.slice(6), el.attributes[oa].value);
+          }
+        }
+
+        // Attach REST triggers if element has a REST verb
+        if (getRestVerb(el)) {
+          var state = elementStates.get(el) || {};
+          state.dataContext = ctx;
+          state.requestInFlight = false;
+          state.intervalIds = state.intervalIds || [];
+          state.observers = state.observers || [];
+          elementStates.set(el, state);
+          attachTriggers(el, ctx, []);
+        } else {
+          // Mark non-REST elements as processed to prevent re-processing
+          // by processNode with the wrong parent context
+          var bState = elementStates.get(el) || {};
+          bState.processed = true;
+          elementStates.set(el, bState);
+        }
+      }
     }
   }
 
@@ -1340,8 +1434,10 @@
       // Skip elements with REST verbs — they will be processed by processNode
       if (getRestVerb(bindEls[j])) continue;
       // Skip elements created by xh-each — they were already bound with the
-      // correct per-item context inside processEach
-      if (bindEls[j].hasAttribute("data-xh-each-item")) continue;
+      // correct per-item context inside processEach.
+      // Check via closest() since only the clone root is marked.
+      if (bindEls[j].closest && bindEls[j].closest("[data-xh-each-item]")) continue;
+      if (!bindEls[j].closest && bindEls[j].hasAttribute("data-xh-each-item")) continue;
       applyBindings(bindEls[j], ctx);
     }
 
@@ -1370,10 +1466,15 @@
    * with the correct data context instead of the root context).
    */
   function markFragmentOwned(fragment) {
-    if (!fragment || !fragment.querySelectorAll) return;
-    var els = fragment.querySelectorAll("*");
-    for (var i = 0; i < els.length; i++) {
-      els[i].setAttribute("data-xh-owned", "");
+    if (!fragment) return;
+    // Only mark top-level children — the MutationObserver receives these as
+    // addedNodes and checks data-xh-owned on them directly. No need to mark
+    // every descendant.
+    var children = fragment.childNodes;
+    for (var i = 0; i < children.length; i++) {
+      if (children[i].nodeType === 1 && children[i].setAttribute) {
+        children[i].setAttribute("data-xh-owned", "");
+      }
     }
   }
 
@@ -2327,26 +2428,53 @@
     }
   }
 
+  // Compound CSS selector covering all known xh-* attributes.
+  // This lets the browser's native selector engine find elements directly
+  // instead of scanning every element and checking attributes manually.
+  var XH_KNOWN_SELECTOR = [
+    "[xh-get]", "[xh-post]", "[xh-put]", "[xh-delete]", "[xh-patch]",
+    "[xh-text]", "[xh-html]", "[xh-each]", "[xh-if]", "[xh-unless]",
+    "[xh-model]", "[xh-trigger]", "[xh-template]", "[xh-swap]", "[xh-target]",
+    "[xh-indicator]", "[xh-show]", "[xh-hide]", "[xh-boost]", "[xh-ws]",
+    "[xh-ws-send]", "[xh-push-url]", "[xh-replace-url]", "[xh-vals]",
+    "[xh-headers]", "[xh-cache]", "[xh-retry]", "[xh-validate]",
+    "[xh-error-template]", "[xh-error-boundary]", "[xh-error-target]",
+    "[xh-focus]", "[xh-disabled-class]", "[xh-i18n]", "[xh-router]",
+    "[xh-route]", "[xh-aria-live]"
+  ].join(",");
+
   /**
    * Gather elements that have xh-* attributes within a root node.
+   * Uses a compound CSS selector for known attributes (fast path) and only
+   * falls back to manual scanning for dynamic attributes (xh-attr-*, xh-on-*,
+   * xh-class-*, xh-i18n-*).
    * @param {Element} root
    * @returns {Element[]}
    */
   function gatherXhElements(root) {
-    var results = [];
     var seen = new Set();
-    var all = root.querySelectorAll("*");
+    var results = [];
 
-    for (var i = 0; i < all.length; i++) {
-      var el = all[i];
-      var attrs = el.attributes;
-      for (var j = 0; j < attrs.length; j++) {
-        if (attrs[j].name.indexOf("xh-") === 0) {
-          if (!seen.has(el)) {
-            seen.add(el);
-            results.push(el);
-          }
-          break; // Found one xh- attr, no need to check more on this element
+    // Fast path: use native CSS selector for known xh-* attributes
+    var known = root.querySelectorAll(XH_KNOWN_SELECTOR);
+    for (var i = 0; i < known.length; i++) {
+      seen.add(known[i]);
+      results.push(known[i]);
+    }
+
+    // Slow path: scan for dynamic xh-attr-*, xh-on-*, xh-class-*, xh-i18n-*
+    // Only needed if elements use these wildcard attribute patterns
+    var all = root.querySelectorAll("*");
+    for (var j = 0; j < all.length; j++) {
+      if (seen.has(all[j])) continue;
+      var attrs = all[j].attributes;
+      for (var k = 0; k < attrs.length; k++) {
+        var name = attrs[k].name;
+        if (name.indexOf("xh-attr-") === 0 || name.indexOf("xh-on-") === 0 ||
+            name.indexOf("xh-class-") === 0 || name.indexOf("xh-i18n-") === 0 ||
+            name.indexOf("xh-error-template-") === 0 || name.indexOf("xh-template-") === 0) {
+          results.push(all[j]);
+          break;
         }
       }
     }
@@ -2536,13 +2664,15 @@
     if (el.hasAttribute && el.hasAttribute("data-xh-owned")) return false;
     // Check the element itself (fast path — avoids full subtree scan)
     if (checkElementForXh(el)) return true;
-    // Check descendants — use a targeted selector instead of querySelectorAll("*")
-    var all = el.querySelectorAll ? el.querySelectorAll("[xh-get],[xh-post],[xh-put],[xh-delete],[xh-patch],[xh-text],[xh-each],[xh-trigger],[xh-template],[xh-model],[xh-ws],[xh-router],[xh-i18n],[xh-boost]") : [];
-    if (all.length > 0) return true;
-    // Fallback: check for wildcard xh-* attrs (xh-attr-*, xh-on-*, etc.)
-    all = el.querySelectorAll ? el.querySelectorAll("*") : [];
-    for (var i = 0; i < all.length; i++) {
-      if (checkElementForXh(all[i])) return true;
+    // Single check using the compound selector that covers all known attributes
+    if (el.querySelectorAll) {
+      // Fast path covers 99% of cases
+      if (el.querySelector(XH_KNOWN_SELECTOR)) return true;
+      // Fallback for dynamic wildcard attrs (xh-attr-*, xh-on-*, xh-class-*, xh-i18n-*)
+      var all = el.querySelectorAll("*");
+      for (var i = 0; i < all.length; i++) {
+        if (checkElementForXh(all[i])) return true;
+      }
     }
     return false;
   }
@@ -2601,6 +2731,9 @@
       }
     },
 
+    /** Cache of compiled regexes for variable substitution: varName -> RegExp */
+    _varRegexCache: {},
+
     t: function(key, vars) {
       var locales = [i18n._locale, i18n._fallback];
       for (var l = 0; l < locales.length; l++) {
@@ -2611,7 +2744,13 @@
           if (vars) {
             for (var v in vars) {
               if (vars.hasOwnProperty(v)) {
-                text = text.replace(new RegExp("\\{" + v + "\\}", "g"), vars[v]);
+                var re = i18n._varRegexCache[v];
+                if (!re) {
+                  re = new RegExp("\\{" + v + "\\}", "g");
+                  i18n._varRegexCache[v] = re;
+                }
+                re.lastIndex = 0;
+                text = text.replace(re, vars[v]);
               }
             }
           }
@@ -2627,6 +2766,9 @@
    *
    * @param {Element} root – The root element to scan.
    */
+  // Common i18n attribute selectors for targeted scanning
+  var I18N_ATTR_SELECTOR = "[xh-i18n-placeholder],[xh-i18n-title],[xh-i18n-alt],[xh-i18n-label],[xh-i18n-aria-label]";
+
   function applyI18n(root) {
     var els = root.querySelectorAll("[xh-i18n]");
     for (var i = 0; i < els.length; i++) {
@@ -2640,16 +2782,32 @@
     }
 
     // xh-i18n-{attr} for attribute translations
+    // Fast path: use targeted selectors for common i18n attribute names
+    var targeted = root.querySelectorAll(I18N_ATTR_SELECTOR);
+    var seen = new Set();
+    for (var t = 0; t < targeted.length; t++) {
+      seen.add(targeted[t]);
+      applyI18nAttrs(targeted[t]);
+    }
+
+    // Slow path: scan for uncommon xh-i18n-* attributes (only if needed)
     var all = root.querySelectorAll("*");
     for (var j = 0; j < all.length; j++) {
-      var attrs = all[j].attributes;
-      for (var a = 0; a < attrs.length; a++) {
-        var name = attrs[a].name;
-        if (name.indexOf("xh-i18n-") === 0 && name !== "xh-i18n-vars") {
-          var targetAttr = name.slice(8);
-          var attrKey = attrs[a].value;
-          all[j].setAttribute(targetAttr, i18n.t(attrKey));
-        }
+      if (seen.has(all[j])) continue;
+      if (checkElementForI18nAttr(all[j])) {
+        applyI18nAttrs(all[j]);
+      }
+    }
+  }
+
+  function applyI18nAttrs(el) {
+    var attrs = el.attributes;
+    for (var a = 0; a < attrs.length; a++) {
+      var name = attrs[a].name;
+      if (name.indexOf("xh-i18n-") === 0 && name !== "xh-i18n-vars") {
+        var targetAttr = name.slice(8);
+        var attrKey = attrs[a].value;
+        el.setAttribute(targetAttr, i18n.t(attrKey));
       }
     }
   }
