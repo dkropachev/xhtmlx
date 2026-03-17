@@ -710,12 +710,46 @@
       fragment.appendChild(clone);
     };
 
-    if (arr.length > config.batchThreshold) {
-      // For large arrays we still render synchronously for simplicity but
-      // could be enhanced with rAF batching in a future version.
-      for (var i = 0; i < arr.length; i++) {
+    if (arr.length > config.batchThreshold && typeof requestAnimationFrame === "function") {
+      // Render first batch immediately (above-the-fold content)
+      var batchSize = config.batchThreshold;
+      for (var i = 0; i < Math.min(batchSize, arr.length); i++) {
         renderItem(arr[i], i);
       }
+      parent.insertBefore(fragment, el);
+
+      // Render remaining in chunks via rAF
+      var offset = batchSize;
+
+      function renderBatch() {
+        var batchFragment = document.createDocumentFragment();
+        var end = Math.min(offset + batchSize, arr.length);
+        for (var b = offset; b < end; b++) {
+          var clone = el.cloneNode(true);
+          clone.setAttribute("data-xh-each-item", "");
+          var cloneDesc = clone.querySelectorAll("*");
+          for (var cd = 0; cd < cloneDesc.length; cd++) {
+            cloneDesc[cd].setAttribute("data-xh-each-item", "");
+          }
+          var itemCtx = new (ctx instanceof MutableDataContext ? MutableDataContext : DataContext)(arr[b], ctx, b);
+          applyBindings(clone, itemCtx);
+          processBindingsInTree(clone, itemCtx);
+          processNode(clone, itemCtx);
+          batchFragment.appendChild(clone);
+        }
+        // Insert after the last inserted batch
+        parent.appendChild(batchFragment);
+        offset = end;
+        if (offset < arr.length) {
+          requestAnimationFrame(renderBatch);
+        }
+      }
+
+      if (offset < arr.length) {
+        requestAnimationFrame(renderBatch);
+      }
+      parent.removeChild(el);
+      return true;
     } else {
       for (var j = 0; j < arr.length; j++) {
         renderItem(arr[j], j);
@@ -1269,8 +1303,20 @@
     //     with the correct per-item data context.
     interpolateDOM(container, ctx);
 
+    // Instead of two querySelectorAll calls, do one pass
+    var allEls = Array.prototype.slice.call(container.querySelectorAll("*"));
+    var eachEls = [];
+    var bindEls = [];
+
+    for (var p = 0; p < allEls.length; p++) {
+      if (allEls[p].hasAttribute("xh-each")) {
+        eachEls.push(allEls[p]);
+      } else {
+        bindEls.push(allEls[p]);
+      }
+    }
+
     // Process xh-each first (top-level only, they handle their own children)
-    var eachEls = Array.prototype.slice.call(container.querySelectorAll("[xh-each]"));
     for (var i = 0; i < eachEls.length; i++) {
       if (!eachEls[i].parentNode) continue;
       // Only process top-level xh-each (not nested inside another xh-each)
@@ -1289,17 +1335,14 @@
     }
 
     // Process other bindings (skip elements already handled by xh-each)
-    var allEls = Array.prototype.slice.call(container.querySelectorAll("*"));
-    for (var j = 0; j < allEls.length; j++) {
-      if (!allEls[j].parentNode) continue;
-      // Skip elements that still have xh-each (shouldn't happen, but guard)
-      if (allEls[j].hasAttribute("xh-each")) continue;
+    for (var j = 0; j < bindEls.length; j++) {
+      if (!bindEls[j].parentNode) continue;
       // Skip elements with REST verbs — they will be processed by processNode
-      if (getRestVerb(allEls[j])) continue;
+      if (getRestVerb(bindEls[j])) continue;
       // Skip elements created by xh-each — they were already bound with the
       // correct per-item context inside processEach
-      if (allEls[j].hasAttribute("data-xh-each-item")) continue;
-      applyBindings(allEls[j], ctx);
+      if (bindEls[j].hasAttribute("data-xh-each-item")) continue;
+      applyBindings(bindEls[j], ctx);
     }
 
     // Move children back into a new fragment
@@ -2263,6 +2306,7 @@
     templateStack = templateStack || [];
 
     if (!root || root.nodeType !== 1) return;
+    if (root.tagName && root.tagName.toLowerCase() === "template") return;
 
     // Process the root element itself if it has xh-* attributes
     processElement(root, ctx, templateStack);
