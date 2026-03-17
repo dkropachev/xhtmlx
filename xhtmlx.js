@@ -2636,6 +2636,13 @@
     },
 
     /**
+     * Scan for <template xh-name="..."> and populate template cache.
+     * Called automatically on DOMContentLoaded. Call manually after
+     * dynamically adding named templates.
+     */
+    scanNamedTemplates: scanNamedTemplates,
+
+    /**
      * Interpolate a string using a data context.
      * @param {string}      str
      * @param {DataContext}  ctx
@@ -2741,6 +2748,7 @@
       performSwap: performSwap,
       buildRequestBody: buildRequestBody,
       fetchTemplate: fetchTemplate,
+      scanNamedTemplates: scanNamedTemplates,
       resolveTemplate: resolveTemplate,
       getSwapTarget: getSwapTarget,
       defaultTrigger: defaultTrigger,
@@ -2781,12 +2789,30 @@
   }
 
   // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // Named template scanning — <template xh-name="/path"> → cache
+  // ---------------------------------------------------------------------------
+
+  function scanNamedTemplates() {
+    if (typeof document === "undefined") return;
+    var named = document.querySelectorAll("template[xh-name]");
+    for (var i = 0; i < named.length; i++) {
+      var name = named[i].getAttribute("xh-name");
+      if (name) {
+        var prefixedName = config.templatePrefix ? config.templatePrefix + name : name;
+        templateCache.set(prefixedName, Promise.resolve(named[i].innerHTML));
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Auto-init on DOMContentLoaded (browser only)
   // ---------------------------------------------------------------------------
 
   if (typeof document !== "undefined" && document.addEventListener) {
     document.addEventListener("DOMContentLoaded", function () {
       injectDefaultCSS();
+      scanNamedTemplates();
       var rootCtx = new DataContext({});
       processNode(document.body, rootCtx, []);
       setupMutationObserver(rootCtx);
