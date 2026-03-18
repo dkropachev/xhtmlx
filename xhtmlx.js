@@ -27,7 +27,8 @@
     apiPrefix: "",              // Prefix prepended to all REST verb URLs
     uiVersion: null,            // Current UI version identifier (any string)
     cspSafe: false,             // When true, avoid innerHTML for CSP compliance
-    breakpoints: { mobile: 768, tablet: 1024 }  // Responsive breakpoint thresholds
+    breakpoints: { mobile: 768, tablet: 1024 },  // Responsive breakpoint thresholds
+    trackRequests: false   // When true, auto-track REST requests via analytics handlers
   };
 
   // ---------------------------------------------------------------------------
@@ -859,6 +860,10 @@
             attachOnHandler(el, el.attributes[oa].name.slice(6), el.attributes[oa].value);
           }
         }
+
+        // Analytics tracking
+        if (el.hasAttribute("xh-track")) setupTrack(el, ctx);
+        if (el.hasAttribute("xh-track-view")) setupTrackView(el, ctx);
 
         // Attach REST triggers if element has a REST verb
         if (getRestVerb(el)) {
@@ -1743,8 +1748,15 @@
       ? fetchWithRetry(url, fetchOpts, retryCount, retryDelay, 0, el)
       : fetch(url, fetchOpts);
 
+    // Track request start time for auto-analytics
+    var requestStartTime = config.trackRequests ? Date.now() : 0;
+    var trackResponseStatus = 0;
+
     fetchPromise
-      .then(processFetchResponse)
+      .then(function (response) {
+        trackResponseStatus = response.status;
+        return processFetchResponse(response);
+      })
       .catch(function (err) {
         console.error("[xhtmlx] request failed:", url, err);
         handleError(el, ctx, 0, "Network Error", err.message, templateStack);
@@ -1757,6 +1769,16 @@
           el.removeAttribute("aria-disabled");
         }
         if (state) state.requestInFlight = false;
+
+        // Auto-track REST requests when enabled
+        if (config.trackRequests && analyticsHandlers.length > 0) {
+          sendAnalytics("xh:request", {
+            method: restInfo.verb,
+            url: url,
+            status: trackResponseStatus,
+            duration: Date.now() - requestStartTime
+          }, el);
+        }
       });
 
     function processFetchResponse(response) {
@@ -2388,6 +2410,118 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Analytics
+  // ---------------------------------------------------------------------------
+
+  var analyticsHandlers = [];
+
+  /**
+   * Register an analytics handler that receives all tracking events.
+   * Multiple handlers can be registered.
+   *
+   * @param {Function} handler – function(eventName, data)
+   */
+  function registerAnalytics(handler) {
+    if (typeof handler === "function") {
+      analyticsHandlers.push(handler);
+    }
+  }
+
+  /**
+   * Send an analytics event to all registered handlers and emit
+   * an xh:track CustomEvent on the element.
+   *
+   * @param {string}  eventName – The tracking event name.
+   * @param {Object}  data      – Event metadata.
+   * @param {Element} [el]      – Source element (for CustomEvent).
+   */
+  function sendAnalytics(eventName, data, el) {
+    for (var i = 0; i < analyticsHandlers.length; i++) {
+      try {
+        analyticsHandlers[i](eventName, data);
+      } catch (e) {
+        if (config.debug) console.error("[xhtmlx] analytics handler error:", e);
+      }
+    }
+    if (el) {
+      emitEvent(el, "xh:track", { event: eventName, data: data }, false);
+    }
+  }
+
+  /**
+   * Set up xh-track on an element. Fires an analytics event on the
+   * element's natural trigger (click/submit/change).
+   *
+   * @param {Element}     el
+   * @param {DataContext}  ctx
+   */
+  function setupTrack(el, ctx) {
+    var trackEvent = el.getAttribute("xh-track");
+    if (!trackEvent) return;
+
+    var triggerEvent = defaultTrigger(el);
+    el.addEventListener(triggerEvent, function () {
+      var data = { element: el.tagName.toLowerCase() };
+      var valsAttr = el.getAttribute("xh-track-vals");
+      if (valsAttr) {
+        try {
+          var interpolated = interpolate(valsAttr, ctx, false);
+          var vals = JSON.parse(interpolated);
+          for (var k in vals) {
+            if (vals.hasOwnProperty(k)) data[k] = vals[k];
+          }
+        } catch (e) {
+          if (config.debug) console.error("[xhtmlx] invalid JSON in xh-track-vals:", valsAttr, e);
+        }
+      }
+      sendAnalytics(trackEvent, data, el);
+    });
+  }
+
+  /**
+   * Set up xh-track-view on an element. Fires an analytics event when
+   * the element enters the viewport via IntersectionObserver.
+   *
+   * @param {Element}     el
+   * @param {DataContext}  ctx
+   */
+  function setupTrackView(el, ctx) {
+    var trackEvent = el.getAttribute("xh-track-view");
+    if (!trackEvent) return;
+
+    if (typeof IntersectionObserver === "undefined") return;
+
+    var observer = new IntersectionObserver(function (entries) {
+      for (var e = 0; e < entries.length; e++) {
+        if (entries[e].isIntersecting) {
+          var data = { element: el.tagName.toLowerCase() };
+          var valsAttr = el.getAttribute("xh-track-vals");
+          if (valsAttr) {
+            try {
+              var interpolated = interpolate(valsAttr, ctx, false);
+              var vals = JSON.parse(interpolated);
+              for (var k in vals) {
+                if (vals.hasOwnProperty(k)) data[k] = vals[k];
+              }
+            } catch (e2) {
+              if (config.debug) console.error("[xhtmlx] invalid JSON in xh-track-vals:", valsAttr, e2);
+            }
+          }
+          sendAnalytics(trackEvent, data, el);
+          observer.disconnect();
+        }
+      }
+    }, { threshold: 0.1 });
+    observer.observe(el);
+
+    // Store observer for cleanup
+    var state = elementStates.get(el) || {};
+    if (!state.observers) state.observers = [];
+    state.observers.push(observer);
+    elementStates.set(el, state);
+  }
+
+  // ---------------------------------------------------------------------------
   // Core processing loop
   // ---------------------------------------------------------------------------
 
@@ -2437,7 +2571,7 @@
     "[xh-headers]", "[xh-cache]", "[xh-retry]", "[xh-validate]",
     "[xh-error-template]", "[xh-error-boundary]", "[xh-error-target]",
     "[xh-focus]", "[xh-disabled-class]", "[xh-i18n]", "[xh-router]",
-    "[xh-route]", "[xh-aria-live]"
+    "[xh-route]", "[xh-aria-live]", "[xh-track]", "[xh-track-view]"
   ].join(",");
 
   /**
@@ -2550,6 +2684,14 @@
     }
     for (var ob = 0; ob < onAttrs.length; ob++) {
       attachOnHandler(el, onAttrs[ob].event, onAttrs[ob].action);
+    }
+
+    // -- analytics tracking -----------------------------------------------------
+    if (el.hasAttribute("xh-track")) {
+      setupTrack(el, ctx);
+    }
+    if (el.hasAttribute("xh-track-view")) {
+      setupTrackView(el, ctx);
     }
 
     // -- i18n support -----------------------------------------------------------
@@ -2667,7 +2809,7 @@
     "[xh-headers]", "[xh-cache]", "[xh-retry]", "[xh-validate]",
     "[xh-error-template]", "[xh-error-boundary]", "[xh-error-target]",
     "[xh-focus]", "[xh-disabled-class]", "[xh-i18n]", "[xh-router]",
-    "[xh-route]", "[xh-aria-live]"
+    "[xh-route]", "[xh-aria-live]", "[xh-track]", "[xh-track-view]"
   ].join(",");
 
   function hasXhAttributes(el) {
@@ -3093,6 +3235,12 @@
     /** SPA Router */
     router: router,
 
+    /**
+     * Register an analytics handler to receive all tracking events.
+     * @param {Function} handler – function(eventName, data)
+     */
+    analytics: registerAnalytics,
+
     /** Internal version string */
     version: "0.2.0",
 
@@ -3146,7 +3294,12 @@
       router: router,
       injectDefaultCSS: injectDefaultCSS,
       getCurrentBreakpoint: getCurrentBreakpoint,
-      getViewportContext: getViewportContext
+      getViewportContext: getViewportContext,
+      analyticsHandlers: analyticsHandlers,
+      sendAnalytics: sendAnalytics,
+      setupTrack: setupTrack,
+      setupTrackView: setupTrackView,
+      registerAnalytics: registerAnalytics
     }
   };
 
