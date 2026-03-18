@@ -539,12 +539,10 @@
       var sval = ctx.resolve(showAttr);
       el.style.display = sval ? "" : "none";
       if (isMutable) {
-        (function(field, element, context) {
-          trackSubscription(element, context, field, function() {
-            var newVal = context.resolve(field);
-            element.style.display = newVal ? "" : "none";
-          });
-        })(showAttr, el, ctx);
+        trackSubscription(el, ctx, showAttr, function() {
+          var newVal = ctx.resolve(showAttr);
+          el.style.display = newVal ? "" : "none";
+        });
       }
     }
 
@@ -554,12 +552,10 @@
       var hdval = ctx.resolve(hideAttr);
       el.style.display = hdval ? "none" : "";
       if (isMutable) {
-        (function(field, element, context) {
-          trackSubscription(element, context, field, function() {
-            var newVal = context.resolve(field);
-            element.style.display = newVal ? "none" : "";
-          });
-        })(hideAttr, el, ctx);
+        trackSubscription(el, ctx, hideAttr, function() {
+          var newVal = ctx.resolve(hideAttr);
+          el.style.display = newVal ? "none" : "";
+        });
       }
     }
 
@@ -589,12 +585,10 @@
       var tv = ctx.resolve(textAttr);
       el.textContent = tv != null ? String(tv) : "";
       if (isMutable) {
-        (function(field, element, context) {
-          trackSubscription(element, context, field, function() {
-            var newVal = context.resolve(field);
-            element.textContent = newVal != null ? String(newVal) : "";
-          });
-        })(textAttr, el, ctx);
+        trackSubscription(el, ctx, textAttr, function() {
+          var newVal = ctx.resolve(textAttr);
+          el.textContent = newVal != null ? String(newVal) : "";
+        });
       }
     }
 
@@ -608,12 +602,10 @@
       } else {
         el.innerHTML = hv != null ? String(hv) : "";
         if (isMutable) {
-          (function(field, element, context) {
-            trackSubscription(element, context, field, function() {
-              var newVal = context.resolve(field);
-              element.innerHTML = newVal != null ? String(newVal) : "";
-            });
-          })(htmlAttr, el, ctx);
+          trackSubscription(el, ctx, htmlAttr, function() {
+            var newVal = ctx.resolve(htmlAttr);
+            el.innerHTML = newVal != null ? String(newVal) : "";
+          });
         }
       }
     }
@@ -3270,6 +3262,27 @@
      */
     analytics: registerAnalytics,
 
+    /**
+     * Tear down xhtmlx: remove global event listeners, disconnect the
+     * MutationObserver, and clear timers.  Useful in SPA scenarios where
+     * the library may be re-initialized.
+     */
+    destroy: function () {
+      if (typeof window !== "undefined") {
+        window.removeEventListener("popstate", popstateHandler);
+        if (resizeListenerAttached) {
+          window.removeEventListener("resize", globalResizeHandler);
+          resizeListenerAttached = false;
+        }
+      }
+      clearTimeout(resizeGlobalTimer);
+      resizeElements.length = 0;
+      if (mutationObserver) {
+        mutationObserver.disconnect();
+        mutationObserver = null;
+      }
+    },
+
     /** Internal version string */
     version: "0.3.0",
 
@@ -3382,31 +3395,33 @@
   // popstate listener — browser history back/forward (xh-push-url support)
   // ---------------------------------------------------------------------------
 
-  if (typeof window !== "undefined") {
-    window.addEventListener("popstate", function (e) {
-      if (e.state && e.state.xhtmlx && e.state.url) {
-        var target = e.state.targetSel ? document.querySelector(e.state.targetSel) : document.body;
-        if (target) {
-          fetch(e.state.url).then(function (r) { return r.text(); }).then(function (text) {
-            var data;
-            try {
-              data = JSON.parse(text);
-            } catch (_) {
-              return;
-            }
-            var ctx = new DataContext(data);
-            if (e.state.templateUrl) {
-              fetchTemplate(e.state.templateUrl).then(function (html) {
-                var fragment = renderTemplate(html, ctx);
-                target.innerHTML = "";
-                target.appendChild(fragment);
-                processNode(target, ctx, []);
-              });
-            }
-          }).catch(function () {});
-        }
+  function popstateHandler(e) {
+    if (e.state && e.state.xhtmlx && e.state.url) {
+      var target = e.state.targetSel ? document.querySelector(e.state.targetSel) : document.body;
+      if (target) {
+        fetch(e.state.url).then(function (r) { return r.text(); }).then(function (text) {
+          var data;
+          try {
+            data = JSON.parse(text);
+          } catch (_) {
+            return;
+          }
+          var ctx = new DataContext(data);
+          if (e.state.templateUrl) {
+            fetchTemplate(e.state.templateUrl).then(function (html) {
+              var fragment = renderTemplate(html, ctx);
+              target.innerHTML = "";
+              target.appendChild(fragment);
+              processNode(target, ctx, []);
+            });
+          }
+        }).catch(function () {});
       }
-    });
+    }
+  }
+
+  if (typeof window !== "undefined") {
+    window.addEventListener("popstate", popstateHandler);
   }
 
   // ---------------------------------------------------------------------------
