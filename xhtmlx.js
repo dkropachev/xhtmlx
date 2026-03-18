@@ -2609,41 +2609,14 @@
 
   /**
    * Gather elements that have xh-* attributes within a root node.
-   * Uses a compound CSS selector for known attributes (fast path) and only
-   * falls back to manual scanning for dynamic attributes (xh-attr-*, xh-on-*,
-   * xh-class-*, xh-i18n-*).
+   * Uses buildCloneSelector to create a targeted compound CSS selector
+   * covering both known and dynamic attributes (xh-attr-*, xh-on-*,
+   * xh-class-*, xh-i18n-*), replacing the old querySelectorAll("*") fallback.
    * @param {Element} root
    * @returns {Element[]}
    */
   function gatherXhElements(root) {
-    var seen = new Set();
-    var results = [];
-
-    // Fast path: use native CSS selector for known xh-* attributes
-    var known = root.querySelectorAll(XH_KNOWN_SELECTOR);
-    for (var i = 0; i < known.length; i++) {
-      seen.add(known[i]);
-      results.push(known[i]);
-    }
-
-    // Slow path: scan for dynamic xh-attr-*, xh-on-*, xh-class-*, xh-i18n-*
-    // Only needed if elements use these wildcard attribute patterns
-    var all = root.querySelectorAll("*");
-    for (var j = 0; j < all.length; j++) {
-      if (seen.has(all[j])) continue;
-      var attrs = all[j].attributes;
-      for (var k = 0; k < attrs.length; k++) {
-        var name = attrs[k].name;
-        if (name.indexOf("xh-attr-") === 0 || name.indexOf("xh-on-") === 0 ||
-            name.indexOf("xh-class-") === 0 || name.indexOf("xh-i18n-") === 0 ||
-            name.indexOf("xh-error-template-") === 0 || name.indexOf("xh-template-") === 0) {
-          results.push(all[j]);
-          break;
-        }
-      }
-    }
-
-    return results;
+    return Array.prototype.slice.call(root.querySelectorAll(buildCloneSelector(root)));
   }
 
   // ---------------------------------------------------------------------------
