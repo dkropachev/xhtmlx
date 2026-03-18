@@ -2925,7 +2925,7 @@
     router: router,
 
     /** Internal version string */
-    version: "0.2.0",
+    version: "0.3.0",
 
     // --- Internals exposed for testing (not part of the public API) ----------
     _internals: {

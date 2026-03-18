@@ -2,6 +2,60 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-03-17
+
+### Added
+
+#### Analytics
+- `xhtmlx.analytics(handler)` — pluggable analytics adapter for tracking user interactions
+- `xh-track` — declarative event tracking on click/submit (`xh-track="button_clicked"`)
+- `xh-track-view` — viewport-based impression tracking via IntersectionObserver
+- `xh-track-vals` — attach extra data to analytics events (`xh-track-vals='{"category":"nav"}'`)
+- Automatic request lifecycle tracking (`request:start`, `request:success`, `request:error`) when an analytics adapter is registered
+
+#### Responsive
+- `resize` trigger — re-fetch/re-render on viewport resize
+- Breakpoint-aware templates (`xh-template-sm`, `xh-template-md`, `xh-template-lg`)
+- `$viewport` variable (xs/sm/md/lg/xl) available in templates
+
+#### Templates
+- `<template xh-name>` — named inline template definitions for reuse without external files
+
+#### Security
+- `config.cspSafe` — CSP-safe mode for environments with strict Content-Security-Policy
+
+#### Tooling
+- `npx xhtmlx-migrate` — CLI migration tool to automate upgrades from htmx to xhtmlx
+- Migration guide documentation
+
+#### Documentation
+- Interactive tutorial: build a Task Manager in 9 steps
+- Comprehensive API reference documentation
+- Interactive playground with mock API
+- StackBlitz template for quick experimentation
+- README badges and SEO meta tags
+
+#### Testing
+- Playwright browser test suite
+- Integration + browser tests for tutorial and API docs
+- Playground smoke tests
+
+### Fixed
+- outerHTML swap binding + rAF guard
+- Auto-init when xhtmlx is loaded after `DOMContentLoaded`
+- Memory leaks in DOM traversals and attribute loops
+
+### Performance
+- Single-pass `renderTemplate`, skip `<template>` elements, rAF list batching
+- Single global resize listener instead of per-element observers
+- Compound CSS selector in `gatherXhElements`
+- Eliminate double-scan in `hasXhAttributes`
+- Mark only top-level fragment children in `markFragmentOwned`
+- Use compound CSS selector in `gatherXhElements`
+- Cache i18n variable regexes, use targeted selectors in `applyI18n`
+- Reduce `processEach` to single DOM traversal per cloned item
+- Avoid slice+join allocations in `DataContext.resolve`
+
 ## [0.2.0] - 2026-03-15
 
 ### Added
