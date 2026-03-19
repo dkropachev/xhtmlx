@@ -810,6 +810,7 @@
       }
 
       if (isMutable && !el.hasAttribute("data-xh-model-bound")) {
+        _hasStatefulElements = true;
         el.setAttribute("data-xh-model-bound", "");
         (function(field, element, context) {
           var eventName = (type === "checkbox" || type === "radio" || tag === "select") ? "change" : "input";
@@ -1019,10 +1020,10 @@
    * @param {Element}     root
    * @param {DataContext}  ctx
    */
-  function processBindingsInTree(root, ctx) {
+  function processBindingsInTree(root, ctx, selectorHint) {
     // Use a targeted selector instead of querySelectorAll("*") so we only
     // visit elements that actually have xh-* attributes.
-    var elements = Array.prototype.slice.call(root.querySelectorAll(buildCloneSelector(root)));
+    var elements = Array.prototype.slice.call(root.querySelectorAll(selectorHint || buildCloneSelector(root)));
     for (var i = 0; i < elements.length; i++) {
       var el = elements[i];
       // Skip if already detached from DOM
@@ -1593,7 +1594,15 @@
   // Selector targeting elements likely to have cleanup state (REST verbs, WS, intervals)
   var CLEANUP_SELECTOR = "[xh-get],[xh-post],[xh-put],[xh-delete],[xh-patch],[xh-ws],[xh-model]";
 
+  // Global flag: set to true when any element with REST/WS/model bindings is
+  // processed. When false, cleanupBeforeSwap can skip the querySelectorAll
+  // entirely — a major win for templates that never use stateful directives.
+  var _hasStatefulElements = false;
+
   function cleanupBeforeSwap(container, includeContainer) {
+    // Fast path: no stateful elements have been registered anywhere
+    if (!_hasStatefulElements) return;
+
     // Only visit elements likely to have intervals/observers/ws state
     var all = container.querySelectorAll(CLEANUP_SELECTOR);
     for (var i = 0; i < all.length; i++) {
@@ -1661,6 +1670,12 @@
 
       case "outerHTML":
         cleanupBeforeSwap(target, true);
+        // Fast path: single-child fragment (most common case)
+        if (fragment.childNodes.length === 1) {
+          var single = fragment.firstChild;
+          target.parentNode.replaceChild(single, target);
+          return single.nodeType === 1 ? single : null;
+        }
         var placeholder = document.createComment("xhtmlx-swap");
         target.parentNode.insertBefore(placeholder, target);
         target.parentNode.removeChild(target);
@@ -1702,7 +1717,11 @@
       default:
         console.warn("[xhtmlx] unknown swap mode:", mode);
         cleanupBeforeSwap(target, false);
-        target.innerHTML = "";
+        if (config.cspSafe) {
+          while (target.firstChild) target.removeChild(target.firstChild);
+        } else {
+          target.innerHTML = "";
+        }
         target.appendChild(fragment);
         return target;
     }
@@ -3336,6 +3355,7 @@
     }
 
     if (el.hasAttribute("xh-ws")) {
+      _hasStatefulElements = true;
       setupWebSocket(el, ctx, templateStack);
       var wState = elementStates.get(el) || {};
       wState.processed = true;
@@ -3365,6 +3385,7 @@
     var restInfo = getRestVerb(el);
 
     if (restInfo) {
+      _hasStatefulElements = true;
       // Initialize element state
       var state = existing || {};
       state.dataContext = ctx;
