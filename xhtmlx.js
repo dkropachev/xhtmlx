@@ -81,6 +81,7 @@
 
   /** Map<string, {data: string, timestamp: number}> — response cache (verb:url → body) */
   var responseCache = new Map();
+  var RESPONSE_CACHE_MAX = 200;
 
   /** Cache for path.split(".") results in DataContext.resolve (bounded) */
   var pathSplitCache = new Map();
@@ -132,6 +133,7 @@
     this.data = data != null ? data : {};
     this.parent = parent || null;
     this.index = index != null ? index : null;
+    this._root = parent ? (parent._root || parent) : this;
   }
 
   /**
@@ -166,12 +168,9 @@
         return rawValue;
       }
       if (pathSplitCache.size >= PATH_SPLIT_CACHE_MAX) {
-        // Evict oldest half instead of flushing entire cache
-        var toDelete = PATH_SPLIT_CACHE_MAX >> 1;
-        var iter = pathSplitCache.keys();
-        for (var d = 0; d < toDelete; d++) {
-          pathSplitCache.delete(iter.next().value);
-        }
+        // Swap to a new Map — O(1) instead of O(n/2) iterator eviction.
+        // The old Map is GC'd; the cache rebuilds quickly from hot paths.
+        pathSplitCache = new Map();
       }
       parts = path.split(".");
       pathSplitCache.set(path, parts);
@@ -191,8 +190,7 @@
     }
 
     if (parts[0] === "$root") {
-      var root = this;
-      while (root.parent) root = root.parent;
+      var root = this._root;
       if (parts.length === 1) return root.data;
       return root._resolveFromParts(parts, 1);
     }
@@ -229,8 +227,7 @@
     }
 
     if (startIdx < parts.length && parts[startIdx] === "$root") {
-      var root = this;
-      while (root.parent) root = root.parent;
+      var root = this._root;
       if (startIdx === parts.length - 1) return root.data;
       return root._resolveFromParts(parts, startIdx + 1);
     }
@@ -366,7 +363,30 @@
    * @returns {string}
    */
   function interpolate(str, ctx, uriEnc) {
-    if (str.indexOf("{{") === -1) return str;
+    var start = str.indexOf("{{");
+    if (start === -1) return str;
+
+    var end = str.indexOf("}}", start);
+    if (end === -1) return str;
+
+    // Single-token fast path — avoids regex engine + callback allocation
+    if (str.indexOf("{{", end + 2) === -1) {
+      var path = str.substring(start + 2, end).trim();
+      var val = ctx.resolve(path);
+      var replacement;
+      if (val === undefined) {
+        if (config.debug) {
+          console.warn("[xhtmlx] unresolved interpolation: {{" + path + "}}");
+        }
+        replacement = "";
+      } else {
+        replacement = String(val);
+        if (uriEnc) replacement = encodeURIComponent(replacement);
+      }
+      return str.substring(0, start) + replacement + str.substring(end + 2);
+    }
+
+    // Multi-token: use regex
     return str.replace(INTERP_RE, function (_match, path) {
       var val = ctx.resolve(path.trim());
       if (val === undefined) {
@@ -399,8 +419,24 @@
       if (replaced !== original) node.nodeValue = replaced;
     }
 
-    // Interpolate non-xh-* attributes on all elements
-    var elements = root.querySelectorAll("*");
+    // Interpolate non-xh-* attributes on elements provided by the caller,
+    // or fall back to querySelectorAll("*") when called standalone.
+    interpolateDOMAttrs(root, ctx);
+  }
+
+  /**
+   * Interpolate {{field}} tokens in non-xh-* attributes.
+   * Accepts an optional pre-collected element list to avoid redundant DOM scans
+   * when the caller already has elements from a targeted query.
+   *
+   * @param {Element}     root
+   * @param {DataContext}  ctx
+   * @param {Element[]}   [elements] – Pre-collected elements to process.
+   */
+  function interpolateDOMAttrs(root, ctx, elements) {
+    if (!elements) {
+      elements = root.querySelectorAll("*");
+    }
     for (var e = 0; e < elements.length; e++) {
       var attrs = elements[e].attributes;
       var hasInterp = false;
@@ -512,17 +548,23 @@
 
   /**
    * Returns the REST verb attribute on an element, if any.
+   * Caches the result in elementStates to avoid repeated getAttribute calls.
    * @param {Element} el
    * @returns {{verb: string, url: string}|null}
    */
   function getRestVerb(el) {
+    var state = elementStates.get(el);
+    if (state && state._restInfo !== undefined) return state._restInfo;
+    var result = null;
     for (var i = 0; i < REST_VERBS.length; i++) {
       var url = el.getAttribute(REST_VERBS[i]);
       if (url != null) {
-        return { verb: VERB_MAP[REST_VERBS[i]], url: url };
+        result = { verb: VERB_MAP[REST_VERBS[i]], url: url };
+        break;
       }
     }
-    return null;
+    if (state) state._restInfo = result;
+    return result;
   }
 
   /**
@@ -544,6 +586,23 @@
     if (!st) { st = {}; elementStates.set(el, st); }
     if (!st.unsubscribes) st.unsubscribes = [];
     st.unsubscribes.push(unsub);
+  }
+
+  /** Subscribe to attr changes without IIFE closure overhead. */
+  function bindAttrSubscription(el, ctx, field, targetAttr) {
+    trackSubscription(el, ctx, field, function() {
+      var newVal = ctx.resolve(field);
+      if (newVal != null) el.setAttribute(targetAttr, String(newVal));
+    });
+  }
+
+  /** Subscribe to class changes without IIFE closure overhead. */
+  function bindClassSubscription(el, ctx, field, className) {
+    trackSubscription(el, ctx, field, function() {
+      var newVal = ctx.resolve(field);
+      if (newVal) el.classList.add(className);
+      else el.classList.remove(className);
+    });
   }
 
   function applyBindings(el, ctx) {
@@ -637,14 +696,7 @@
           el.setAttribute(targetAttr, String(aval));
         }
         if (isMutable) {
-          (function(field, tAttr, element, context) {
-            trackSubscription(element, context, field, function() {
-              var newVal = context.resolve(field);
-              if (newVal != null) {
-                element.setAttribute(tAttr, String(newVal));
-              }
-            });
-          })(attrs[i].value, targetAttr, el, ctx);
+          bindAttrSubscription(el, ctx, attrs[i].value, targetAttr);
         }
       } else if (aName.indexOf("xh-class-") === 0) {
         var className = aName.slice(9);
@@ -655,16 +707,7 @@
           el.classList.remove(className);
         }
         if (isMutable) {
-          (function(field, clsName, element, context) {
-            trackSubscription(element, context, field, function() {
-              var newVal = context.resolve(field);
-              if (newVal) {
-                element.classList.add(clsName);
-              } else {
-                element.classList.remove(clsName);
-              }
-            });
-          })(attrs[i].value, className, el, ctx);
+          bindClassSubscription(el, ctx, attrs[i].value, className);
         }
       }
     }
@@ -1046,6 +1089,21 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Shared form helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Convert a form's data to a plain object.
+   * @param {HTMLFormElement} form
+   * @returns {Object}
+   */
+  function formDataToObject(form) {
+    var obj = {};
+    new FormData(form).forEach(function(v, k) { obj[k] = v; });
+    return obj;
+  }
+
+  // ---------------------------------------------------------------------------
   // Request handling
   // ---------------------------------------------------------------------------
 
@@ -1062,10 +1120,10 @@
     // If the trigger element is (or is inside) a form, serialize the form
     var form = el.tagName.toLowerCase() === "form" ? el : el.closest("form");
     if (form) {
-      var formData = new FormData(form);
-      formData.forEach(function (value, key) {
-        body[key] = value;
-      });
+      var formObj = formDataToObject(form);
+      for (var fk in formObj) {
+        if (formObj.hasOwnProperty(fk)) body[fk] = formObj[fk];
+      }
     }
 
     // Merge xh-vals
@@ -1458,13 +1516,15 @@
     // We need a temporary container because DocumentFragment doesn't support
     // querySelectorAll with :scope or certain traversals in all browsers.
 
-    // 2a. Interpolate {{field}} in text nodes and non-xh-* attributes only.
-    //     This leaves xh-get URLs, xh-text values, etc. for later processing
-    //     with the correct per-item data context.
-    interpolateDOM(container, ctx);
+    // 2a. Interpolate {{field}} in text nodes and attributes.
+    //     Short-circuit the attribute scan if the template has no interpolation tokens.
+    if (html.indexOf("{{") !== -1) {
+      interpolateDOM(container, ctx);
+    }
 
-    // Instead of two querySelectorAll calls, do one pass
-    var allEls = Array.prototype.slice.call(container.querySelectorAll("*"));
+    // Use targeted selector instead of querySelectorAll("*")
+    var targetedSelector = buildCloneSelector(container);
+    var allEls = Array.prototype.slice.call(container.querySelectorAll(targetedSelector));
     var eachEls = [];
     var bindEls = [];
 
@@ -1900,6 +1960,14 @@
 
         // Cache the response if xh-cache is set
         if (cacheAttr && restInfo.verb === "GET" && bodyText) {
+          if (responseCache.size >= RESPONSE_CACHE_MAX) {
+            // Evict oldest half (Map preserves insertion order)
+            var toEvict = RESPONSE_CACHE_MAX >> 1;
+            var rcIter = responseCache.keys();
+            for (var rc = 0; rc < toEvict; rc++) {
+              responseCache.delete(rcIter.next().value);
+            }
+          }
           responseCache.set(cacheKey, { data: bodyText, timestamp: Date.now() });
         }
 
@@ -2333,7 +2401,7 @@
       var data = {};
       var form = el.tagName.toLowerCase() === "form" ? el : el.closest("form");
       if (form) {
-        new FormData(form).forEach(function(v, k) { data[k] = v; });
+        data = formDataToObject(form);
       }
       var vals = el.getAttribute("xh-vals");
       if (vals) {
@@ -2431,8 +2499,7 @@
     form.setAttribute("data-xh-boosted", "");
     form.addEventListener("submit", function(e) {
       e.preventDefault();
-      var body = {};
-      new FormData(form).forEach(function(v, k) { body[k] = v; });
+      var body = formDataToObject(form);
 
       var fetchOpts = { method: method, headers: {} };
       if (method !== "GET") {
@@ -2475,6 +2542,12 @@
 
   function registerDirective(name, handler) {
     customDirectives.push({ name: name, handler: handler });
+    // Include the custom directive's attribute in targeted selectors
+    var sel = "[" + name + "]";
+    if (!dynamicAttrSelectors[sel]) {
+      dynamicAttrSelectors[sel] = true;
+      rebuildDetectSelector();
+    }
   }
 
   function registerHook(event, handler) {
@@ -2674,15 +2747,24 @@
     var extra = Object.keys(dynamicAttrSelectors);
     var selector = extra.length ? XH_KNOWN_SELECTOR + "," + extra.join(",") : XH_KNOWN_SELECTOR;
 
-    // Fast check: if the subtree may contain undiscovered dynamic attrs,
-    // do a one-time broader scan via buildCloneSelector to discover them.
-    var html = root.innerHTML;
-    if (html && (html.indexOf("xh-on-") !== -1 || html.indexOf("xh-attr-") !== -1 ||
-        html.indexOf("xh-class-") !== -1 || html.indexOf("xh-i18n-") !== -1)) {
-      selector = buildCloneSelector(root);
+    // Check for undiscovered dynamic attrs using querySelector (avoids
+    // expensive innerHTML serialization of the entire subtree).
+    var candidates = root.querySelectorAll(selector);
+    for (var i = 0; i < candidates.length; i++) {
+      var attrs = candidates[i].attributes;
+      for (var a = 0; a < attrs.length; a++) {
+        var name = attrs[a].name;
+        if ((name.indexOf("xh-on-") === 0 || name.indexOf("xh-attr-") === 0 ||
+             name.indexOf("xh-class-") === 0 || name.indexOf("xh-i18n-") === 0) &&
+            !dynamicAttrSelectors["[" + name + "]"]) {
+          // Found undiscovered dynamic attrs — do a full scan once
+          selector = buildCloneSelector(root);
+          return Array.prototype.slice.call(root.querySelectorAll(selector));
+        }
+      }
     }
 
-    return Array.prototype.slice.call(root.querySelectorAll(selector));
+    return Array.prototype.slice.call(candidates);
   }
 
   // ---------------------------------------------------------------------------
@@ -2744,18 +2826,11 @@
     var existing = elementStates.get(el);
     if (existing && existing.processed) return;
 
-    // -- xh-on-* event handlers -----------------------------------------------
-    var onAttrs = [];
+    // -- xh-on-* event handlers (single pass, no intermediate array) ----------
     for (var oa = 0; oa < el.attributes.length; oa++) {
       if (el.attributes[oa].name.indexOf("xh-on-") === 0) {
-        onAttrs.push({
-          event: el.attributes[oa].name.slice(6),
-          action: el.attributes[oa].value
-        });
+        attachOnHandler(el, el.attributes[oa].name.slice(6), el.attributes[oa].value);
       }
-    }
-    for (var ob = 0; ob < onAttrs.length; ob++) {
-      attachOnHandler(el, onAttrs[ob].event, onAttrs[ob].action);
     }
 
     // -- analytics tracking -----------------------------------------------------
@@ -2897,6 +2972,9 @@
    * @returns {boolean}
    */
   function checkElementForXh(el) {
+    // Delegate to browser's optimized CSS matching engine
+    if (el.matches) return el.matches(XH_DETECT_SELECTOR);
+    // Fallback for elements without matches (shouldn't happen in modern browsers)
     if (!el.attributes) return false;
     for (var i = 0; i < el.attributes.length; i++) {
       if (el.attributes[i].name.indexOf("xh-") === 0) return true;
