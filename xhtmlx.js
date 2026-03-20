@@ -2320,10 +2320,10 @@
       if (hasEach) {
         // Walk up to check if inside an xh-each item (WeakSet replaces DOM attribute)
         var inEach = false;
-        var p = bindEls[j];
-        while (p && p !== container) {
-          if (eachItemSet.has(p)) { inEach = true; break; }
-          p = p.parentNode;
+        var ancestor = bindEls[j];
+        while (ancestor && ancestor !== container) {
+          if (eachItemSet.has(ancestor)) { inEach = true; break; }
+          ancestor = ancestor.parentNode;
         }
         if (inEach) continue;
       }
