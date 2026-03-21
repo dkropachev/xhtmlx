@@ -7,12 +7,16 @@
  *
  * xhtmlx.render() patches bound DOM nodes in place on subsequent calls,
  * similar to how React's reconciler diffs and patches.
+ *
+ * React side uses a stateful component with useState, which is how real
+ * React apps work. setState(sameRef) bails via Object.is() — equivalent
+ * to xhtmlx's data-identity check. setState(newObj) triggers reconciliation.
  */
 
 const { bench } = require('../bench-helper');
 const xhtmlx = require('../../../xhtmlx.js');
 const { DataContext } = xhtmlx._internals;
-const { h, syncRender, syncUnmount } = require('./react-helper');
+const { h, createStatefulBench } = require('./react-helper');
 
 describe('vs React: Patched render (DOM diffing)', () => {
   let xhContainer, reactContainer;
@@ -26,7 +30,6 @@ describe('vs React: Patched render (DOM diffing)', () => {
   });
 
   afterEach(() => {
-    syncUnmount(reactContainer);
     xhContainer.remove();
     reactContainer.remove();
   });
@@ -43,9 +46,15 @@ describe('vs React: Patched render (DOM diffing)', () => {
 
   test('[React]             single text — same data', () => {
     const data = { name: 'Alice' };
+    const { update, teardown } = createStatefulBench(
+      d => h('span', null, d.name),
+      reactContainer
+    );
+    update(data); // initial render
     bench('React:            1 text same data', 50000, () => {
-      syncRender(h('span', null, data.name), reactContainer);
+      update(data); // same reference → useState bail → noop
     });
+    teardown();
   });
 
   // --- Single text binding, changing data ---
@@ -59,10 +68,15 @@ describe('vs React: Patched render (DOM diffing)', () => {
   });
 
   test('[React]             single text — changing data', () => {
+    const { update, teardown } = createStatefulBench(
+      d => h('span', null, d.count),
+      reactContainer
+    );
     let i = 0;
     bench('React:            1 text changing', 50000, () => {
-      syncRender(h('span', null, i++), reactContainer);
+      update({ count: i++ }); // new object → re-render
     });
+    teardown();
   });
 
   // --- 5 text bindings, same data ---
@@ -80,14 +94,19 @@ describe('vs React: Patched render (DOM diffing)', () => {
 
   test('[React]             5 texts — same data', () => {
     const data = { a: 'A', b: 'B', c: 'C', d: 'D', e: 'E' };
-    const tree = h('div', null,
-      h('span', null, data.a), h('span', null, data.b),
-      h('span', null, data.c), h('span', null, data.d),
-      h('span', null, data.e)
+    const { update, teardown } = createStatefulBench(
+      d => h('div', null,
+        h('span', null, d.a), h('span', null, d.b),
+        h('span', null, d.c), h('span', null, d.d),
+        h('span', null, d.e)
+      ),
+      reactContainer
     );
+    update(data);
     bench('React:            5 text same', 20000, () => {
-      syncRender(tree, reactContainer);
+      update(data);
     });
+    teardown();
   });
 
   // --- 10 text bindings, changing data ---
@@ -108,14 +127,22 @@ describe('vs React: Patched render (DOM diffing)', () => {
   });
 
   test('[React]             10 texts — changing data', () => {
+    const { update, teardown } = createStatefulBench(
+      d => {
+        const children = [];
+        for (let i = 0; i < 10; i++) children.push(h('span', { key: i }, d[`f${i}`]));
+        return h('div', null, ...children);
+      },
+      reactContainer
+    );
     let n = 0;
     bench('React:            10 text changing', 10000, () => {
-      const children = Array.from({ length: 10 }, (_, i) =>
-        h('span', { key: i }, `v${n + i}`)
-      );
-      syncRender(h('div', null, ...children), reactContainer);
+      const data = {};
+      for (let i = 0; i < 10; i++) data[`f${i}`] = `v${n + i}`;
+      update(data);
       n++;
     });
+    teardown();
   });
 
   // --- Dashboard card (mixed bindings), same data ---
@@ -134,17 +161,20 @@ describe('vs React: Patched render (DOM diffing)', () => {
 
   test('[React]             dashboard card — same data', () => {
     const data = { title: 'Revenue', value: '$12,345', change: '+5%', positive: true, link: '/r' };
+    const { update, teardown } = createStatefulBench(
+      d => h('div', { className: 'card' },
+        h('h3', null, d.title),
+        h('div', null, d.value),
+        h('span', { className: d.positive ? 'up' : '' }, d.change),
+        h('a', { href: d.link }, 'Details')
+      ),
+      reactContainer
+    );
+    update(data);
     bench('React:            card same', 20000, () => {
-      syncRender(
-        h('div', { className: 'card' },
-          h('h3', null, data.title),
-          h('div', null, data.value),
-          h('span', { className: data.positive ? 'up' : '' }, data.change),
-          h('a', { href: data.link }, 'Details')
-        ),
-        reactContainer
-      );
+      update(data);
     });
+    teardown();
   });
 
   // --- Dashboard card, changing data ---
@@ -167,19 +197,25 @@ describe('vs React: Patched render (DOM diffing)', () => {
   });
 
   test('[React]             dashboard card — changing data', () => {
+    const { update, teardown } = createStatefulBench(
+      d => h('div', { className: 'card' },
+        h('h3', null, d.title),
+        h('div', null, d.value),
+        h('span', { className: d.positive ? 'up' : '' }, d.change),
+        h('a', { href: d.link }, 'Details')
+      ),
+      reactContainer
+    );
     let i = 0;
     bench('React:            card changing', 20000, () => {
-      syncRender(
-        h('div', { className: 'card' },
-          h('h3', null, 'Revenue'),
-          h('div', null, `$${10000 + i}`),
-          h('span', { className: i % 2 === 0 ? 'up' : '' }, `+${i % 10}%`),
-          h('a', { href: `/r/${i}` }, 'Details')
-        ),
-        reactContainer
-      );
+      update({
+        title: 'Revenue', value: `$${10000 + i}`,
+        change: `+${i % 10}%`, positive: i % 2 === 0,
+        link: `/r/${i}`
+      });
       i++;
     });
+    teardown();
   });
 
   // --- User profile card (9 bindings), same data ---
@@ -205,21 +241,24 @@ describe('vs React: Patched render (DOM diffing)', () => {
       name: 'Alice', email: 'a@b.com', avatar: '/a.png', role: 'Dev',
       location: 'SF', verified: true, posts: 142, followers: 1283
     };
+    const { update, teardown } = createStatefulBench(
+      d => h('div', { className: 'profile-card' },
+        h('img', { src: d.avatar, alt: d.name, className: 'avatar' }),
+        h('h2', { className: d.verified ? 'verified' : '' }, d.name),
+        h('p', null, d.role), h('p', null, d.email),
+        h('p', null, d.location),
+        h('span', null, d.posts), h('span', null, d.followers)
+      ),
+      reactContainer
+    );
+    update(d);
     bench('React:            profile same', 10000, () => {
-      syncRender(
-        h('div', { className: 'profile-card' },
-          h('img', { src: d.avatar, alt: d.name, className: 'avatar' }),
-          h('h2', { className: d.verified ? 'verified' : '' }, d.name),
-          h('p', null, d.role), h('p', null, d.email),
-          h('p', null, d.location),
-          h('span', null, d.posts), h('span', null, d.followers)
-        ),
-        reactContainer
-      );
+      update(d);
     });
+    teardown();
   });
 
-  // --- Conditional (xh-if) with toggle ---
+  // --- Conditional (xh-show) same data ---
 
   test('[xhtmlx render()] conditional — same (no toggle)', () => {
     const html = '<div><div xh-show="show"><span xh-text="name"></span></div></div>';
@@ -230,11 +269,15 @@ describe('vs React: Patched render (DOM diffing)', () => {
   });
 
   test('[React]             conditional — same (no toggle)', () => {
+    const data = { show: true, name: 'Alice' };
+    const { update, teardown } = createStatefulBench(
+      d => h('div', null, h('div', null, h('span', null, d.name))),
+      reactContainer
+    );
+    update(data);
     bench('React:            cond same', 20000, () => {
-      syncRender(
-        h('div', null, h('div', null, h('span', null, 'Alice'))),
-        reactContainer
-      );
+      update(data);
     });
+    teardown();
   });
 });

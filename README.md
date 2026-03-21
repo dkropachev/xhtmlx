@@ -769,16 +769,16 @@ xhtmlx is benchmarked head-to-head against React 19 on every release. The number
 
 | Scenario | xhtmlx | React 19 | Winner |
 |---|---:|---:|---|
-| 1 text — changing data | **22.05M ops/s** | 68.4K ops/s | **xhtmlx 322x** |
-| 1 text — same data (noop) | **17.37M ops/s** | 56.3K ops/s | **xhtmlx 308x** |
-| 5 text — same data (noop) | **43.65M ops/s** | 160.1K ops/s | **xhtmlx 272x** |
-| 10 text — changing data | **1.63M ops/s** | 14.5K ops/s | **xhtmlx 112x** |
-| Card — changing data | **7.93M ops/s** | 29.2K ops/s | **xhtmlx 271x** |
-| Card — same data (noop) | **20.97M ops/s** | 36.0K ops/s | **xhtmlx 582x** |
-| Conditional — same (noop) | **19.36M ops/s** | 51.4K ops/s | **xhtmlx 376x** |
-| Profile — same (noop) | **22.03M ops/s** | 29.7K ops/s | **xhtmlx 741x** |
+| 1 text — changing data | **8.12M ops/s** | 49.1K ops/s | **xhtmlx 165x** |
+| 1 text — same data (noop) | **15.98M ops/s** | 5.52M ops/s | **xhtmlx 2.9x** |
+| 5 text — same data (noop) | **46.05M ops/s** | 10.69M ops/s | **xhtmlx 4.3x** |
+| 10 text — changing data | **1.50M ops/s** | 12.8K ops/s | **xhtmlx 117x** |
+| Card — changing data | **8.63M ops/s** | 27.2K ops/s | **xhtmlx 317x** |
+| Card — same data (noop) | **23.49M ops/s** | 9.64M ops/s | **xhtmlx 2.4x** |
+| Conditional — same (noop) | **19.98M ops/s** | 10.99M ops/s | **xhtmlx 1.8x** |
+| Profile — same (noop) | **21.02M ops/s** | 10.89M ops/s | **xhtmlx 1.9x** |
 
-xhtmlx's `render()` API patches only changed DOM bindings in place — no virtual DOM diff, no reconciliation, no tree walk. This is where the library shines for polling, WebSocket streams, and reactive state updates: **112–741x faster** than React.
+xhtmlx's `render()` API patches only changed DOM bindings in place — no virtual DOM diff, no reconciliation, no tree walk. When data actually changes, xhtmlx is **117–317x faster**. For same-data noop updates (both sides bail on identity check), xhtmlx is **1.8–4.3x faster**.
 
 ### Render + Swap — renderTemplate + performSwap pipeline
 
@@ -798,7 +798,8 @@ Both sides benefit from caching when re-rendering the same data: xhtmlx auto-pat
 
 | Category | Winner | Magnitude |
 |---|---|---|
-| Re-render / patching (`render()`) | **xhtmlx** | **112–741x faster** |
+| Re-render — changing data | **xhtmlx** | **117–317x faster** |
+| Re-render — same data (noop) | **xhtmlx** | **1.8–4.3x faster** |
 | Render + swap pipeline | **xhtmlx** | **19–34x faster** |
 | Bundle size | **xhtmlx** | 2.7x smaller (~17KB vs ~46KB+) |
 
