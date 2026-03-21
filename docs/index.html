@@ -5,21 +5,21 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>xhtmlx — REST APIs meet declarative HTML</title>
 <meta name="title" content="xhtmlx — REST APIs meet declarative HTML">
-<meta name="description" content="A lightweight, zero-dependency JavaScript library for building dynamic UIs with REST APIs using declarative HTML attributes. Like htmx, but your server returns JSON and the browser renders the UI. ~16KB gzipped.">
+<meta name="description" content="A lightweight, zero-dependency JavaScript library for building dynamic UIs with REST APIs using declarative HTML attributes. Like htmx, but your server returns JSON and the browser renders the UI. Up to 678x faster than React. ~17KB gzipped.">
 <meta name="keywords" content="xhtmlx, htmx alternative, javascript library, rest api, json, client-side rendering, declarative html, no build step, lightweight, web framework">
 
 <!-- Open Graph / Facebook -->
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://teryxjs.github.io/xhtmlx/">
 <meta property="og:title" content="xhtmlx — REST APIs meet declarative HTML">
-<meta property="og:description" content="Like htmx, but your server returns JSON and the browser renders the UI. Zero dependencies, ~16KB gzipped, 910+ tests.">
+<meta property="og:description" content="Like htmx, but your server returns JSON and the browser renders the UI. Up to 678x faster than React. Zero dependencies, ~17KB gzipped, 1024 tests.">
 <meta property="og:image" content="https://teryxjs.github.io/xhtmlx/og-image.png">
 
 <!-- Twitter -->
 <meta property="twitter:card" content="summary_large_image">
 <meta property="twitter:url" content="https://teryxjs.github.io/xhtmlx/">
 <meta property="twitter:title" content="xhtmlx — REST APIs meet declarative HTML">
-<meta property="twitter:description" content="Like htmx, but your server returns JSON and the browser renders the UI. Zero dependencies, ~16KB gzipped.">
+<meta property="twitter:description" content="Like htmx, but your server returns JSON and the browser renders the UI. Up to 678x faster than React. Zero dependencies, ~17KB gzipped.">
 <meta property="twitter:image" content="https://teryxjs.github.io/xhtmlx/og-image.png">
 
 <!-- Favicon -->
@@ -388,7 +388,11 @@ img { max-width: 100%; }
   gap: 16px;
   justify-content: center;
   flex-wrap: wrap;
-  margin-bottom: 48px;
+  margin-bottom: 16px;
+}
+.hero-github-stars {
+  text-align: center;
+  margin-bottom: 40px;
 }
 
 .btn {
@@ -1929,9 +1933,12 @@ html[data-theme="light"] .syn-kw { color: #9333ea; font-weight: 600; }
         GitHub
       </a>
     </div>
+    <div class="hero-github-stars fade-in fade-in-delay-4">
+      <iframe src="https://ghbtns.com/github-btn.html?user=teryxjs&repo=xhtmlx&type=star&count=true&size=large" frameborder="0" scrolling="0" width="170" height="30" title="Star teryxjs/xhtmlx on GitHub"></iframe>
+    </div>
     <div class="hero-stats fade-in fade-in-delay-4">
       <div class="hero-stat">
-        <div class="hero-stat-value">~16KB</div>
+        <div class="hero-stat-value">~17KB</div>
         <div class="hero-stat-label">Gzipped</div>
       </div>
       <div class="hero-stat">
@@ -3289,9 +3296,9 @@ html[data-theme="light"] .syn-kw { color: #9333ea; font-weight: 600; }
           </tr>
           <tr>
             <td>File size (gzipped)</td>
-            <td class="highlight">~16KB</td>
+            <td class="highlight">~17KB</td>
             <td>~14KB</td>
-            <td>~40KB+</td>
+            <td>~46KB+</td>
             <td>~15KB</td>
           </tr>
           <tr>
