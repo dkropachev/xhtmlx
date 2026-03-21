@@ -11,7 +11,7 @@ A lightweight, zero-dependency JavaScript library for building dynamic UIs with 
 
 Like [htmx](https://htmx.org), but instead of receiving HTML from the server, xhtmlx receives **JSON** and renders UI **client-side** using templates.
 
-**~10KB gzipped** | **780 tests** | **Zero dependencies** | **No build step**
+**~10KB gzipped** | **780 tests** | **Zero dependencies** | **No build step** | **[Up to 630x faster re-renders than React](#performance)**
 
 [Documentation & Demos](https://teryxjs.github.io/xhtmlx/) | [GitHub](https://github.com/teryxjs/xhtmlx)
 
