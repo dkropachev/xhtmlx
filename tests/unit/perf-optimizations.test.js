@@ -7,11 +7,9 @@ const {
   DataContext,
   interpolate,
   renderTemplate,
-  applyBindings,
   processEach,
   processElement,
   i18n,
-  applyI18n,
 } = xhtmlx._internals;
 
 // ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-const { bench, benchAsync } = require('./bench-helper');
+const { bench } = require('./bench-helper');
 const xhtmlx = require('../../xhtmlx.js');
 const { DataContext, renderTemplate, performSwap, templateCache } = xhtmlx._internals;
 

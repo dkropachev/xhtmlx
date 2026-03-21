@@ -1352,8 +1352,8 @@
     var parts = raw.split(",");
     var specs = [];
 
-    for (var p = 0; p < parts.length; p++) {
-      var tokens = parts[p].trim().split(/\s+/);
+    for (var pi = 0; pi < parts.length; pi++) {
+      var tokens = parts[pi].trim().split(/\s+/);
       if (tokens.length === 0 || tokens[0] === "") continue;
 
       var spec = {
@@ -2661,11 +2661,11 @@
     var eachEls = [];
     var bindEls = [];
 
-    for (var p = 0; p < allEls.length; p++) {
-      if (allEls[p].hasAttribute("xh-each")) {
-        eachEls.push(allEls[p]);
+    for (var ae = 0; ae < allEls.length; ae++) {
+      if (allEls[ae].hasAttribute("xh-each")) {
+        eachEls.push(allEls[ae]);
       } else {
-        bindEls.push(allEls[p]);
+        bindEls.push(allEls[ae]);
       }
     }
 
@@ -4412,8 +4412,8 @@
         if (match) {
           // Extract params
           var params = {};
-          for (var p = 0; p < route.paramNames.length; p++) {
-            params[route.paramNames[p]] = match[p + 1];
+          for (var rp = 0; rp < route.paramNames.length; rp++) {
+            params[route.paramNames[rp]] = match[rp + 1];
           }
 
           // Update active class

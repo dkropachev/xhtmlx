@@ -4,7 +4,7 @@
 
 const { bench } = require('./bench-helper');
 const xhtmlx = require('../../xhtmlx.js');
-const { DataContext, renderTemplate, processBindingsInTree } = xhtmlx._internals;
+const { DataContext, renderTemplate } = xhtmlx._internals;
 
 describe('Benchmark: Template rendering', () => {
   test('renderTemplate — simple (1 binding)', () => {

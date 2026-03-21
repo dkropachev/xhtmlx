@@ -12,7 +12,7 @@
 const { bench } = require('../bench-helper');
 const xhtmlx = require('../../../xhtmlx.js');
 const { DataContext } = xhtmlx._internals;
-const { h, React } = require('./react-helper');
+const { h } = require('./react-helper');
 
 describe('vs React: Creation overhead', () => {
 

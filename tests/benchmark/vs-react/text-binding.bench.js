@@ -11,7 +11,7 @@
 
 const { bench } = require('../bench-helper');
 const xhtmlx = require('../../../xhtmlx.js');
-const { DataContext, renderTemplate, performSwap, applyBindings } = xhtmlx._internals;
+const { DataContext, renderTemplate, performSwap } = xhtmlx._internals;
 const { h, syncRender, syncUnmount } = require('./react-helper');
 
 describe('vs React: Text content binding', () => {

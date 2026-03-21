@@ -36,7 +36,7 @@ function mockFetchJSON(data, status = 200) {
 }
 
 function mockFetchSequence(responses) {
-  responses.forEach((resp, idx) => {
+  responses.forEach((resp) => {
     global.fetch.mockResolvedValueOnce({
       ok: (resp.status || 200) >= 200 && (resp.status || 200) < 300,
       status: resp.status || 200,

@@ -65,7 +65,6 @@ describe('Benchmark: Trigger parsing', () => {
     const div = document.createElement('div');
     const form = document.createElement('form');
     const input = document.createElement('input');
-    const btn = document.createElement('button');
     bench('defaultTrigger (div)', 200000, () => {
       defaultTrigger(div);
     });

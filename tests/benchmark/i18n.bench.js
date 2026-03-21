@@ -4,7 +4,7 @@
 
 const { bench } = require('./bench-helper');
 const xhtmlx = require('../../xhtmlx.js');
-const { i18n, applyI18n, DataContext } = xhtmlx._internals;
+const { i18n, applyI18n } = xhtmlx._internals;
 
 describe('Benchmark: i18n', () => {
   beforeEach(() => {
