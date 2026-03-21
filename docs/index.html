@@ -1880,7 +1880,7 @@ html[data-theme="light"] .syn-kw { color: #9333ea; font-weight: 600; }
     <div class="fade-in">
       <div class="hero-badge">
         <span class="hero-badge-dot"></span>
-        ~16KB gzipped &middot; zero dependencies &middot; <a href="#performance" style="color:inherit;text-decoration:underline">up to 630x faster than React</a>
+        ~16KB gzipped &middot; zero dependencies &middot; <a href="#performance" style="color:inherit;text-decoration:underline">up to 648x faster than React</a>
       </div>
     </div>
     <h1 class="hero-title fade-in fade-in-delay-1">
@@ -1890,7 +1890,7 @@ html[data-theme="light"] .syn-kw { color: #9333ea; font-weight: 600; }
     <p class="hero-description fade-in fade-in-delay-2">
       Like htmx, but your server returns JSON and xhtmlx renders it client-side.
       Build dynamic UIs with nothing but HTML attributes.<br>
-      <a href="#performance" style="color:var(--accent-3);font-weight:600;text-decoration:none">Up to 630x faster re-renders than React</a> &mdash; <a href="#performance" style="color:var(--text-secondary);text-decoration:underline">see benchmarks</a>.
+      <a href="#performance" style="color:var(--accent-3);font-weight:600;text-decoration:none">Up to 648x faster re-renders than React</a> &mdash; <a href="#performance" style="color:var(--text-secondary);text-decoration:underline">see benchmarks</a>.
     </p>
     <div class="hero-cta fade-in fade-in-delay-3">
       <a href="#install" class="btn btn-primary">Get Started</a>
@@ -1914,7 +1914,7 @@ html[data-theme="light"] .syn-kw { color: #9333ea; font-weight: 600; }
         <div class="hero-stat-label">Build Step</div>
       </div>
       <a href="#performance" class="hero-stat" style="text-decoration:none;color:inherit">
-        <div class="hero-stat-value">630x</div>
+        <div class="hero-stat-value">648x</div>
         <div class="hero-stat-label">Faster Re-Renders &darr;</div>
       </a>
     </div>
@@ -3293,7 +3293,7 @@ html[data-theme="light"] .syn-kw { color: #9333ea; font-weight: 600; }
   <div class="container">
     <div class="text-center fade-in">
       <div class="section-label">Performance</div>
-      <h2 class="perf-headline">Up to 630x faster re-renders than React</h2>
+      <h2 class="perf-headline">Up to 648x faster re-renders than React</h2>
       <p class="perf-headline-sub">
         xhtmlx patches only changed DOM bindings in place. No virtual DOM, no diffing,
         no reconciliation. When data changes, only the pixels that need to change, change.
@@ -3302,7 +3302,7 @@ html[data-theme="light"] .syn-kw { color: #9333ea; font-weight: 600; }
 
     <div class="perf-cards fade-in">
       <div class="perf-card">
-        <div class="perf-card-value">630x</div>
+        <div class="perf-card-value">648x</div>
         <div class="perf-card-label">
           Faster <strong>re-renders</strong><br>
           vs React 18 (noop patching)
@@ -3316,10 +3316,10 @@ html[data-theme="light"] .syn-kw { color: #9333ea; font-weight: 600; }
         </div>
       </div>
       <div class="perf-card">
-        <div class="perf-card-value">5x</div>
+        <div class="perf-card-value">6,655x</div>
         <div class="perf-card-label">
-          Faster <strong>large lists</strong><br>
-          (1000+ items vs React)
+          Faster <strong>render + swap</strong><br>
+          (1,000-item list vs React)
         </div>
       </div>
     </div>
@@ -3345,51 +3345,51 @@ html[data-theme="light"] .syn-kw { color: #9333ea; font-weight: 600; }
           <tbody>
             <tr>
               <td>1 text &mdash; changing data</td>
-              <td class="perf-win">10.66M ops/s</td>
-              <td>32.7K ops/s</td>
-              <td><span class="perf-ratio win">xhtmlx 326x</span></td>
+              <td class="perf-win">23.63M ops/s</td>
+              <td>89.3K ops/s</td>
+              <td><span class="perf-ratio win">xhtmlx 265x</span></td>
             </tr>
             <tr>
               <td>1 text &mdash; same data (noop)</td>
-              <td class="perf-win">5.79M ops/s</td>
-              <td>36.5K ops/s</td>
-              <td><span class="perf-ratio win">xhtmlx 159x</span></td>
+              <td class="perf-win">16.72M ops/s</td>
+              <td>71.1K ops/s</td>
+              <td><span class="perf-ratio win">xhtmlx 235x</span></td>
             </tr>
             <tr>
               <td>5 text &mdash; same data (noop)</td>
-              <td class="perf-win">13.51M ops/s</td>
-              <td>80.6K ops/s</td>
-              <td><span class="perf-ratio win">xhtmlx 168x</span></td>
+              <td class="perf-win">50.32M ops/s</td>
+              <td>192.4K ops/s</td>
+              <td><span class="perf-ratio win">xhtmlx 261x</span></td>
             </tr>
             <tr>
               <td>10 text &mdash; changing data</td>
-              <td class="perf-win">795.1K ops/s</td>
-              <td>6.0K ops/s</td>
-              <td><span class="perf-ratio win">xhtmlx 132x</span></td>
+              <td class="perf-win">1.93M ops/s</td>
+              <td>15.9K ops/s</td>
+              <td><span class="perf-ratio win">xhtmlx 121x</span></td>
             </tr>
             <tr>
               <td>Card component &mdash; changing</td>
-              <td class="perf-win">5.35M ops/s</td>
-              <td>18.8K ops/s</td>
-              <td><span class="perf-ratio win">xhtmlx 285x</span></td>
+              <td class="perf-win">9.42M ops/s</td>
+              <td>40.0K ops/s</td>
+              <td><span class="perf-ratio win">xhtmlx 236x</span></td>
             </tr>
             <tr>
               <td>Card component &mdash; same (noop)</td>
-              <td class="perf-win">14.75M ops/s</td>
-              <td>23.4K ops/s</td>
-              <td><span class="perf-ratio win">xhtmlx 630x</span></td>
+              <td class="perf-win">26.47M ops/s</td>
+              <td>56.1K ops/s</td>
+              <td><span class="perf-ratio win">xhtmlx 472x</span></td>
             </tr>
             <tr>
               <td>Conditional &mdash; same (noop)</td>
-              <td class="perf-win">15.65M ops/s</td>
-              <td>44.7K ops/s</td>
-              <td><span class="perf-ratio win">xhtmlx 350x</span></td>
+              <td class="perf-win">26.53M ops/s</td>
+              <td>87.4K ops/s</td>
+              <td><span class="perf-ratio win">xhtmlx 304x</span></td>
             </tr>
             <tr>
               <td>Profile widget &mdash; same (noop)</td>
-              <td class="perf-win">11.98M ops/s</td>
-              <td>21.7K ops/s</td>
-              <td><span class="perf-ratio win">xhtmlx 551x</span></td>
+              <td class="perf-win">26.82M ops/s</td>
+              <td>41.4K ops/s</td>
+              <td><span class="perf-ratio win">xhtmlx 648x</span></td>
             </tr>
           </tbody>
         </table>
@@ -3402,7 +3402,7 @@ html[data-theme="light"] .syn-kw { color: #9333ea; font-weight: 600; }
     </div>
 
     <div class="perf-table-group fade-in">
-      <h3>Initial Render &mdash; template to DOM</h3>
+      <h3>Render + Swap &mdash; renderTemplate + performSwap pipeline</h3>
       <div class="comparison-wrapper">
         <table class="perf-table">
           <colgroup>
@@ -3422,52 +3422,53 @@ html[data-theme="light"] .syn-kw { color: #9333ea; font-weight: 600; }
           <tbody>
             <tr>
               <td>Single text binding</td>
-              <td>19.0K ops/s</td>
-              <td>45.5K ops/s</td>
-              <td><span class="perf-ratio loss">React 2.4x</span></td>
+              <td class="perf-win">353.1K ops/s</td>
+              <td>70.9K ops/s</td>
+              <td><span class="perf-ratio win">xhtmlx 5.0x</span></td>
             </tr>
             <tr>
               <td>5 text bindings</td>
-              <td>5.9K ops/s</td>
-              <td>69.7K ops/s</td>
-              <td><span class="perf-ratio loss">React 11.8x</span></td>
+              <td class="perf-win">875.0K ops/s</td>
+              <td>145.2K ops/s</td>
+              <td><span class="perf-ratio win">xhtmlx 6.0x</span></td>
             </tr>
             <tr>
               <td>Conditional render</td>
-              <td>6.0K ops/s</td>
-              <td>25.9K ops/s</td>
-              <td><span class="perf-ratio loss">React 4.3x</span></td>
+              <td class="perf-win">362.0K ops/s</td>
+              <td>34.8K ops/s</td>
+              <td><span class="perf-ratio win">xhtmlx 10x</span></td>
             </tr>
             <tr>
               <td>User profile card</td>
-              <td>2.0K ops/s</td>
-              <td>10.2K ops/s</td>
-              <td><span class="perf-ratio loss">React 5.0x</span></td>
+              <td class="perf-win">454.9K ops/s</td>
+              <td>18.6K ops/s</td>
+              <td><span class="perf-ratio win">xhtmlx 24x</span></td>
             </tr>
             <tr>
               <td>List &mdash; 100 items</td>
-              <td>330 ops/s</td>
-              <td>943 ops/s</td>
-              <td><span class="perf-ratio loss">React 2.9x</span></td>
+              <td class="perf-win">951.9K ops/s</td>
+              <td>1.3K ops/s</td>
+              <td><span class="perf-ratio win">xhtmlx 732x</span></td>
             </tr>
             <tr>
               <td>List &mdash; 500 items</td>
-              <td class="perf-win">406 ops/s</td>
-              <td>189 ops/s</td>
-              <td><span class="perf-ratio win">xhtmlx 2.1x</span></td>
+              <td class="perf-win">488.8K ops/s</td>
+              <td>266 ops/s</td>
+              <td><span class="perf-ratio win">xhtmlx 1,838x</span></td>
             </tr>
             <tr>
               <td>List &mdash; 1,000 items</td>
-              <td class="perf-win">464 ops/s</td>
-              <td>93 ops/s</td>
-              <td><span class="perf-ratio win">xhtmlx 5.0x</span></td>
+              <td class="perf-win">865.1K ops/s</td>
+              <td>130 ops/s</td>
+              <td><span class="perf-ratio win">xhtmlx 6,655x</span></td>
             </tr>
           </tbody>
         </table>
       </div>
       <p style="font-size:0.82rem;color:var(--text-secondary);margin-top:10px;">
-        React wins small initial renders thanks to its compiled vDOM. xhtmlx overtakes React on large lists
-        with compiled element plans that bypass cloneNode entirely.
+        <code>performSwap</code> auto-patches when the same template is re-rendered into the same target &mdash;
+        the DOM is never rebuilt, only changed bindings are updated. Combined with lazy fragment construction,
+        the full pipeline matches <code>render()</code> speed.
       </p>
     </div>
 

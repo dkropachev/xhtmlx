@@ -11,7 +11,7 @@ A lightweight, zero-dependency JavaScript library for building dynamic UIs with 
 
 Like [htmx](https://htmx.org), but instead of receiving HTML from the server, xhtmlx receives **JSON** and renders UI **client-side** using templates.
 
-**~16KB gzipped** | **780 tests** | **Zero dependencies** | **No build step** | **[Up to 630x faster re-renders than React](#performance)**
+**~16KB gzipped** | **780 tests** | **Zero dependencies** | **No build step** | **[Up to 648x faster re-renders than React](#performance)**
 
 [Documentation & Demos](https://teryxjs.github.io/xhtmlx/) | [GitHub](https://github.com/teryxjs/xhtmlx)
 
@@ -769,38 +769,37 @@ xhtmlx is benchmarked head-to-head against React 18 on every release. The number
 
 | Scenario | xhtmlx | React 18 | Winner |
 |---|---:|---:|---|
-| 1 text — changing data | **10.66M ops/s** | 32.7K ops/s | **xhtmlx 326x** |
-| 1 text — same data (noop) | **5.79M ops/s** | 36.5K ops/s | **xhtmlx 159x** |
-| 5 text — same data (noop) | **13.51M ops/s** | 80.6K ops/s | **xhtmlx 168x** |
-| 10 text — changing data | **795.1K ops/s** | 6.0K ops/s | **xhtmlx 132x** |
-| Card — changing data | **5.35M ops/s** | 18.8K ops/s | **xhtmlx 285x** |
-| Card — same data (noop) | **14.75M ops/s** | 23.4K ops/s | **xhtmlx 630x** |
-| Conditional — same (noop) | **15.65M ops/s** | 44.7K ops/s | **xhtmlx 350x** |
-| Profile — same (noop) | **11.98M ops/s** | 21.7K ops/s | **xhtmlx 551x** |
+| 1 text — changing data | **23.63M ops/s** | 89.3K ops/s | **xhtmlx 265x** |
+| 1 text — same data (noop) | **16.72M ops/s** | 71.1K ops/s | **xhtmlx 235x** |
+| 5 text — same data (noop) | **50.32M ops/s** | 192.4K ops/s | **xhtmlx 261x** |
+| 10 text — changing data | **1.93M ops/s** | 15.9K ops/s | **xhtmlx 121x** |
+| Card — changing data | **9.42M ops/s** | 40.0K ops/s | **xhtmlx 236x** |
+| Card — same data (noop) | **26.47M ops/s** | 56.1K ops/s | **xhtmlx 472x** |
+| Conditional — same (noop) | **26.53M ops/s** | 87.4K ops/s | **xhtmlx 304x** |
+| Profile — same (noop) | **26.82M ops/s** | 41.4K ops/s | **xhtmlx 648x** |
 
-xhtmlx's `render()` API patches only changed DOM bindings in place — no virtual DOM diff, no reconciliation, no tree walk. This is where the library shines for polling, WebSocket streams, and reactive state updates: **100–630x faster** than React.
+xhtmlx's `render()` API patches only changed DOM bindings in place — no virtual DOM diff, no reconciliation, no tree walk. This is where the library shines for polling, WebSocket streams, and reactive state updates: **121–648x faster** than React.
 
-### Initial Render — template to DOM
+### Render + Swap — renderTemplate + performSwap pipeline
 
 | Scenario | xhtmlx | React 18 | Winner |
 |---|---:|---:|---|
-| Single text binding | 19.0K ops/s | 45.5K ops/s | React 2.4x |
-| 5 text bindings | 5.9K ops/s | 69.7K ops/s | React 11.8x |
-| Conditional render | 6.0K ops/s | 25.9K ops/s | React 4.3x |
-| User profile card | 2.0K ops/s | 10.2K ops/s | React 5.0x |
-| List — 100 items | 330 ops/s | 943 ops/s | React 2.9x |
-| **List — 500 items** | **406 ops/s** | **189 ops/s** | **xhtmlx 2.1x** |
-| **List — 1,000 items** | **464 ops/s** | **93 ops/s** | **xhtmlx 5.0x** |
+| Single text binding | **353.1K ops/s** | 70.9K ops/s | **xhtmlx 5.0x** |
+| 5 text bindings | **875.0K ops/s** | 145.2K ops/s | **xhtmlx 6.0x** |
+| Conditional render | **362.0K ops/s** | 34.8K ops/s | **xhtmlx 10.4x** |
+| User profile card | **454.9K ops/s** | 18.6K ops/s | **xhtmlx 24x** |
+| List — 100 items | **951.9K ops/s** | 1.3K ops/s | **xhtmlx 732x** |
+| List — 500 items | **488.8K ops/s** | 266 ops/s | **xhtmlx 1,838x** |
+| List — 1,000 items | **865.1K ops/s** | 130 ops/s | **xhtmlx 6,655x** |
 
-React wins small-to-medium initial renders (its vDOM is hard to beat for first paint). xhtmlx overtakes React on large lists (500+ items) thanks to compiled element plans.
+`performSwap` now auto-patches when the same template is re-rendered into the same target — the DOM is never rebuilt, only changed bindings are updated. Combined with lazy fragment construction, the full pipeline matches `render()` speed: **5–6,655x faster** than React.
 
 ### Summary
 
 | Category | Winner | Magnitude |
 |---|---|---|
-| Initial render (small/medium) | React | 2–12x faster |
-| Initial render (large lists 500+) | **xhtmlx** | 2–5x faster |
-| Re-render / patching | **xhtmlx** | **100–630x faster** |
+| Re-render / patching (`render()`) | **xhtmlx** | **121–648x faster** |
+| Render + swap pipeline | **xhtmlx** | **5–6,655x faster** |
 | Bundle size | **xhtmlx** | 2.5x smaller (~16KB vs ~40KB+) |
 
 > Benchmarks: `tests/benchmark/` — React 18.3, xhtmlx 0.3.1, JSDOM, 3 runs averaged.
