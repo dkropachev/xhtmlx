@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.1] - 2026-03-21
+
+### Fixed
+- Fix `no-redeclare` lint error: rename duplicate `var p` declarations in IIFE scope
+- Remove unused imports and dead code across benchmark and test files
+- Lint now passes with zero errors and zero warnings
+
+### Changed
+- Optimize CI pipeline: parallel jobs, Playwright browser caching, skip browser tests in publish
+- Update site meta tags, fix stale stats (~16KB to ~17KB, test count to 1024)
+- Add GitHub star button to hero section
+
 ## [0.4.0] - 2026-03-21
 
 ### Security
