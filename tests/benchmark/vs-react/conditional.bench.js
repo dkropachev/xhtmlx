@@ -47,13 +47,14 @@ describe('vs React: Conditional rendering', () => {
 
   test('[React]  conditional — true (show content)', () => {
     const data = { show: true, name: 'Alice', bio: 'Developer' };
+    // Hoist tree — static data, give React ref-equality bail-out
+    const tree = h('div', null,
+      data.show ? h('div', null,
+        h('span', null, data.name),
+        h('p', null, data.bio)
+      ) : null
+    );
     bench('React:  cond true', 5000, () => {
-      const tree = h('div', null,
-        data.show ? h('div', null,
-          h('span', null, data.name),
-          h('p', null, data.bio)
-        ) : null
-      );
       syncRender(tree, reactContainer);
     });
   });
@@ -75,13 +76,14 @@ describe('vs React: Conditional rendering', () => {
 
   test('[React]  conditional — false (hide content)', () => {
     const data = { show: false, name: 'Alice', bio: 'Developer' };
+    // Hoist tree — static data
+    const tree = h('div', null,
+      data.show ? h('div', null,
+        h('span', null, data.name),
+        h('p', null, data.bio)
+      ) : null
+    );
     bench('React:  cond false', 5000, () => {
-      const tree = h('div', null,
-        data.show ? h('div', null,
-          h('span', null, data.name),
-          h('p', null, data.bio)
-        ) : null
-      );
       syncRender(tree, reactContainer);
     });
   });
@@ -99,13 +101,12 @@ describe('vs React: Conditional rendering', () => {
   });
 
   test('[React]  conditional toggle — alternating true/false', () => {
+    // Pre-build both trees to avoid createElement overhead per toggle
+    const treeTrue = h('div', null, h('div', null, h('span', null, 'Alice')));
+    const treeFalse = h('div', null, null);
     let toggle = true;
     bench('React:  cond toggle', 5000, () => {
-      const show = toggle;
-      const tree = h('div', null,
-        show ? h('div', null, h('span', null, 'Alice')) : null
-      );
-      syncRender(tree, reactContainer);
+      syncRender(toggle ? treeTrue : treeFalse, reactContainer);
       toggle = !toggle;
     });
   });
