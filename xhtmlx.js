@@ -562,6 +562,10 @@
     var promise = fetch(fetchUrl).then(function (res) {
       if (!res.ok) throw new Error("Template fetch failed: " + fetchUrl + " (" + res.status + ")");
       return res.text();
+    }).catch(function (err) {
+      // Evict failed fetches so subsequent attempts can retry
+      templateCache.delete(fetchUrl);
+      throw err;
     });
     templateCache.set(fetchUrl, promise);
     return promise;
@@ -1263,9 +1267,10 @@
   function navigatePath(root, path) {
     var node = root;
     for (var i = 0; i < path.length; i++) {
+      if (!node || !node.children) return null;
       node = node.children[path[i]];
     }
-    return node;
+    return node || null;
   }
 
   /**
@@ -1334,6 +1339,7 @@
    * @returns {Object[]}
    */
   var triggerSpecCache = new Map();
+  var TRIGGER_SPEC_CACHE_MAX = 500;
 
   function parseTrigger(raw) {
     if (!raw || !raw.trim()) return [];
@@ -1391,6 +1397,9 @@
 
       specs.push(spec);
     }
+    if (triggerSpecCache.size >= TRIGGER_SPEC_CACHE_MAX) {
+      triggerSpecCache = new Map();
+    }
     triggerSpecCache.set(raw, specs);
     return specs;
   }
@@ -1418,6 +1427,8 @@
   function formDataToObject(form) {
     var obj = {};
     new FormData(form).forEach(function(v, k) {
+      // Skip File inputs — they can't be serialized to JSON
+      if (typeof File !== "undefined" && v instanceof File) return;
       if (Object.prototype.hasOwnProperty.call(obj, k)) {
         // Collect multiple values into an array (select-multiple, checkboxes)
         if (Array.isArray(obj[k])) { obj[k].push(v); }
@@ -1691,6 +1702,18 @@
   // processed. When false, cleanupBeforeSwap can skip the querySelectorAll
   // entirely — a major win for templates that never use stateful directives.
   var _hasStatefulElements = false;
+
+  /**
+   * CSP-safe helper to remove all children from an element.
+   * @param {Element} el
+   */
+  function _clearChildren(el) {
+    if (config.cspSafe) {
+      while (el.firstChild) el.removeChild(el.firstChild);
+    } else {
+      el.textContent = "";
+    }
+  }
 
   function cleanupBeforeSwap(container, includeContainer) {
     // Fast path: no stateful elements have been registered anywhere
@@ -2071,7 +2094,8 @@
         case 3: // XH_HTML
           if (!config.cspSafe) {
             var hv = ctx.resolve(a1);
-            el.innerHTML = hv != null ? String(hv) : "";
+            var hvStr = hv != null ? String(hv) : "";
+            el.innerHTML = config.sanitizeHtml ? config.sanitizeHtml(hvStr) : hvStr;
           }
           break;
         case 4: // XH_SHOW
@@ -2778,8 +2802,10 @@
   // Validation
   // ---------------------------------------------------------------------------
 
-  // Cache compiled validation regexes by pattern string
+  // Cache compiled validation regexes by pattern string (bounded)
   var validationRegexCache = {};
+  var validationRegexCacheSize = 0;
+  var VALIDATION_REGEX_CACHE_MAX = 200;
 
   /**
    * Validate fields within the scope of an element.
@@ -2815,15 +2841,22 @@
       var pattern = field.getAttribute("xh-validate-pattern");
       if (pattern && value) {
         if (!validationRegexCache[pattern]) {
+          if (validationRegexCacheSize >= VALIDATION_REGEX_CACHE_MAX) {
+            validationRegexCache = {};
+            validationRegexCacheSize = 0;
+          }
           try {
             validationRegexCache[pattern] = new RegExp(pattern);
+            validationRegexCacheSize++;
           } catch (regexErr) {
             if (config.debug) console.warn("[xhtmlx] invalid xh-validate-pattern:", pattern, regexErr);
             validationRegexCache[pattern] = null;
+            validationRegexCacheSize++;
           }
         }
       }
-      if (pattern && value && validationRegexCache[pattern] && !validationRegexCache[pattern].test(value)) {
+      // Guard against ReDoS by limiting the input length tested against user-provided patterns
+      if (pattern && value && value.length <= 10000 && validationRegexCache[pattern] && !validationRegexCache[pattern].test(value)) {
         error = customMsg || fieldName + " format is invalid";
       }
 
@@ -3440,6 +3473,17 @@
     var wsUrl = el.getAttribute("xh-ws");
     if (!wsUrl) return;
 
+    // Clean up any existing WebSocket before creating a new one (reconnect path)
+    var existingState = elementStates.get(el);
+    if (existingState && existingState.ws) {
+      existingState.ws.onclose = null;
+      existingState.ws.onerror = null;
+      existingState.ws.onmessage = null;
+      existingState.ws.onopen = null;
+      if (existingState.ws.readyState < 2) existingState.ws.close(1000);
+      existingState.ws = null;
+    }
+
     var ws;
     try {
       ws = new WebSocket(wsUrl);
@@ -3448,7 +3492,7 @@
       return;
     }
 
-    var state = elementStates.get(el) || {};
+    var state = existingState || {};
     state.ws = ws;
     elementStates.set(el, state);
 
@@ -3593,6 +3637,7 @@
     link.addEventListener("click", function(e) {
       e.preventDefault();
       var boostContainer = link.closest("[xh-boost]");
+      if (!boostContainer) return;
       var boostTarget = boostContainer.getAttribute("xh-boost-target") || "#xh-boost-content";
       var target = document.querySelector(boostTarget);
       if (!target) target = document.body;
@@ -3627,7 +3672,11 @@
           fetchTemplate(templateUrl).then(function(html) {
             var fragment = renderTemplate(html, childCtx);
             cleanupBeforeSwap(target, false);
-            target.innerHTML = "";
+            if (config.cspSafe) {
+              while (target.firstChild) target.removeChild(target.firstChild);
+            } else {
+              target.textContent = "";
+            }
             target.appendChild(fragment);
             processNode(target, childCtx, []);
           });
@@ -3652,6 +3701,12 @@
     var method = (form.getAttribute("method") || "GET").toUpperCase();
     if (!action) return;
 
+    // Block cross-origin boosted forms to prevent leaking cookies
+    try {
+      var parsed = new URL(action, window.location.href);
+      if (parsed.origin !== window.location.origin) return;
+    } catch(_) { return; }
+
     form.setAttribute("data-xh-boosted", "");
     form.addEventListener("submit", function(e) {
       e.preventDefault();
@@ -3669,6 +3724,7 @@
       }
 
       var boostContainer = form.closest("[xh-boost]");
+      if (!boostContainer) return;
       var boostTarget = boostContainer.getAttribute("xh-boost-target") || "#xh-boost-content";
       var target = document.querySelector(boostTarget);
       if (!target) target = form;
@@ -3677,14 +3733,21 @@
         return response.text();
       }).then(function(text) {
         var jsonData;
-        try { jsonData = JSON.parse(text); } catch(e) { return; }
+        try { jsonData = JSON.parse(text); } catch(e) {
+          if (config.debug) console.warn("[xhtmlx] boosted form response is not JSON:", e);
+          return;
+        }
         var childCtx = new DataContext(jsonData, ctx);
         var templateUrl = boostContainer.getAttribute("xh-boost-template");
         if (templateUrl) {
           fetchTemplate(templateUrl).then(function(html) {
             var fragment = renderTemplate(html, childCtx);
             cleanupBeforeSwap(target, false);
-            target.innerHTML = "";
+            if (config.cspSafe) {
+              while (target.firstChild) target.removeChild(target.firstChild);
+            } else {
+              target.textContent = "";
+            }
             target.appendChild(fragment);
             processNode(target, childCtx, []);
           });
@@ -4374,7 +4437,7 @@
                 fetchTemplate(route.template).then(function(html) {
                   var fragment = renderTemplate(html, childCtx);
                   cleanupBeforeSwap(router._outlet, false);
-                  router._outlet.innerHTML = "";
+                  _clearChildren(router._outlet);
                   router._outlet.appendChild(fragment);
                   processNode(router._outlet, childCtx, []);
                 });
@@ -4387,7 +4450,7 @@
             fetchTemplate(route.template).then(function(html) {
               var fragment = renderTemplate(html, ctx);
               cleanupBeforeSwap(router._outlet, false);
-              router._outlet.innerHTML = "";
+              _clearChildren(router._outlet);
               router._outlet.appendChild(fragment);
               processNode(router._outlet, ctx, []);
             });
@@ -4404,8 +4467,10 @@
         fetchTemplate(router._notFoundTemplate).then(function(html) {
           var fragment = renderTemplate(html, ctx404);
           cleanupBeforeSwap(router._outlet, false);
-          router._outlet.innerHTML = "";
+          _clearChildren(router._outlet);
           router._outlet.appendChild(fragment);
+        }).catch(function(err) {
+          if (config.debug) console.error("[xhtmlx] 404 template fetch failed:", err);
         });
       }
 
@@ -4526,7 +4591,8 @@
             break;
           case 1: // html
             op.last = newVal;
-            el.innerHTML = newVal != null ? (typeof newVal === "string" ? newVal : String(newVal)) : "";
+            var patchHtml = newVal != null ? (typeof newVal === "string" ? newVal : String(newVal)) : "";
+            el.innerHTML = config.sanitizeHtml ? config.sanitizeHtml(patchHtml) : patchHtml;
             break;
           case 2: // show
             op.last = newVal;
@@ -4715,6 +4781,8 @@
       renderFragmentCache.clear();
       _rfcLastKey = null; _rfcLastVal = null;
       responseCache.clear();
+      pathSplitCache = new Map();
+      triggerSpecCache = new Map();
       // Re-register <template xh-name> elements with the updated prefix
       scanNamedTemplates();
 
@@ -4792,6 +4860,10 @@
       renderFragmentCache.clear();
       _rfcLastKey = null; _rfcLastVal = null;
       responseCache.clear();
+      pathSplitCache = new Map();
+      triggerSpecCache = new Map();
+      validationRegexCache = {};
+      validationRegexCacheSize = 0;
     },
 
     /** Internal version string */
@@ -4920,6 +4992,12 @@
   function popstateHandler(e) {
     // Handle xh-push-url history entries (state carries url property)
     if (e.state && e.state.xhtmlx && e.state.url) {
+      // Block cross-origin URLs in history state to prevent cookie leaking
+      try {
+        var parsedUrl = new URL(e.state.url, window.location.href);
+        if (parsedUrl.origin !== window.location.origin) return;
+      } catch(_) { return; }
+
       var target = e.state.targetSel ? document.querySelector(e.state.targetSel) : document.body;
       if (target) {
         fetch(e.state.url).then(function (r) { return r.text(); }).then(function (text) {
@@ -4934,12 +5012,18 @@
             fetchTemplate(e.state.templateUrl).then(function (html) {
               var fragment = renderTemplate(html, ctx);
               cleanupBeforeSwap(target, false);
-              target.innerHTML = "";
+              if (config.cspSafe) {
+                while (target.firstChild) target.removeChild(target.firstChild);
+              } else {
+                target.textContent = "";
+              }
               target.appendChild(fragment);
               processNode(target, ctx, []);
             });
           }
-        }).catch(function () {});
+        }).catch(function (err) {
+          if (config.debug) console.warn("[xhtmlx] popstate fetch failed:", err);
+        });
       }
       return;
     }
