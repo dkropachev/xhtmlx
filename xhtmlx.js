@@ -28,7 +28,8 @@
     uiVersion: null,            // Current UI version identifier (any string)
     cspSafe: false,             // When true, avoid innerHTML for CSP compliance
     breakpoints: { mobile: 768, tablet: 1024 },  // Responsive breakpoint thresholds
-    trackRequests: false   // When true, auto-track REST requests via analytics handlers
+    trackRequests: false,  // When true, auto-track REST requests via analytics handlers
+    sanitizeHtml: null     // Optional hook: function(html) -> sanitized string for xh-html
   };
 
   // ---------------------------------------------------------------------------
@@ -158,10 +159,8 @@
     if (config.cspSafe && document.adoptedStyleSheets !== undefined) {
       var sheet = new CSSStyleSheet();
       sheet.replaceSync(cssText);
-      document.adoptedStyleSheets = [].concat(
-        Array.prototype.slice.call(document.adoptedStyleSheets),
-        [sheet]
-      );
+      // Use push to avoid overwriting sheets added by other libraries (TOCTOU)
+      document.adoptedStyleSheets.push(sheet);
       return;
     }
 
@@ -318,16 +317,21 @@
    * @param {number}   [startIdx=0] – Index to start resolving from.
    * @returns {*}
    */
+  var DANGEROUS_PROTO_KEYS = { "__proto__": true, "constructor": true, "prototype": true };
+
   function resolveDot(obj, parts, startIdx) {
     var start = startIdx || 0;
     // Fast path for single-key lookups (most common case)
     if (parts.length - start === 1) {
-      return obj != null && typeof obj === "object" && parts[start] in obj ? obj[parts[start]] : undefined;
+      var key = parts[start];
+      if (DANGEROUS_PROTO_KEYS[key]) return undefined;
+      return obj != null && typeof obj === "object" && Object.prototype.hasOwnProperty.call(obj, key) ? obj[key] : undefined;
     }
     var cur = obj;
     for (var i = start; i < parts.length; i++) {
+      if (DANGEROUS_PROTO_KEYS[parts[i]]) return undefined;
       if (cur == null || typeof cur !== "object") return undefined;
-      if (!(parts[i] in cur)) return undefined;
+      if (!Object.prototype.hasOwnProperty.call(cur, parts[i])) return undefined;
       cur = cur[parts[i]];
     }
     return cur;
@@ -367,10 +371,13 @@
     }
     var obj = this.data;
     for (var i = 0; i < parts.length - 1; i++) {
+      if (DANGEROUS_PROTO_KEYS[parts[i]]) return;
       if (obj[parts[i]] == null) obj[parts[i]] = {};
       obj = obj[parts[i]];
     }
-    obj[parts[parts.length - 1]] = value;
+    var lastKey = parts[parts.length - 1];
+    if (DANGEROUS_PROTO_KEYS[lastKey]) return;
+    obj[lastKey] = value;
     this._notify(path);
   };
 
@@ -406,9 +413,12 @@
     for (var i = 0; i < snapshot.length; i++) {
       try { snapshot[i](); }
       catch (e) {
-        // Subscriber references a detached element — remove from live list
-        var idx = subs.indexOf(snapshot[i]);
-        if (idx !== -1) subs.splice(idx, 1);
+        if (config.debug) console.warn("[xhtmlx] subscriber error on path '" + path + "':", e);
+        // Only remove subscriber if it references a detached DOM element
+        if (e instanceof DOMException || (e && e.name === "NotFoundError")) {
+          var idx = subs.indexOf(snapshot[i]);
+          if (idx !== -1) subs.splice(idx, 1);
+        }
       }
     }
   };
@@ -799,11 +809,13 @@
         if (config.debug) console.warn("[xhtmlx] xh-html is disabled in CSP-safe mode, falling back to xh-text");
         el.textContent = hv != null ? String(hv) : "";
       } else {
-        el.innerHTML = hv != null ? String(hv) : "";
+        var hvStr = hv != null ? String(hv) : "";
+        el.innerHTML = config.sanitizeHtml ? config.sanitizeHtml(hvStr) : hvStr;
         if (isMutable) {
           trackSubscription(el, ctx, htmlField, function() {
             var newVal = ctx.resolve(htmlField);
-            el.innerHTML = newVal != null ? String(newVal) : "";
+            var s = newVal != null ? String(newVal) : "";
+            el.innerHTML = config.sanitizeHtml ? config.sanitizeHtml(s) : s;
           });
         }
       }
@@ -1406,7 +1418,7 @@
   function formDataToObject(form) {
     var obj = {};
     new FormData(form).forEach(function(v, k) {
-      if (obj.hasOwnProperty(k)) {
+      if (Object.prototype.hasOwnProperty.call(obj, k)) {
         // Collect multiple values into an array (select-multiple, checkboxes)
         if (Array.isArray(obj[k])) { obj[k].push(v); }
         else { obj[k] = [obj[k], v]; }
@@ -1793,6 +1805,7 @@
         return target;
 
       case "outerHTML":
+        if (!target.parentNode) return null;
         cleanupBeforeSwap(target, true);
         // Fast path: single-child fragment (most common case)
         if (fragment.childNodes.length === 1) {
@@ -1823,10 +1836,12 @@
         return target;
 
       case "beforebegin":
+        if (!target.parentNode) return null;
         target.parentNode.insertBefore(fragment, target);
         return target.parentNode;
 
       case "afterend":
+        if (!target.parentNode) return null;
         target.parentNode.insertBefore(fragment, target.nextSibling);
         return target.parentNode;
 
@@ -2504,11 +2519,6 @@
   // One-entry cache for renderFragmentCache lookups (opt #5)
   var _rfcLastKey = null, _rfcLastVal = null;
 
-  // Reusable sentinel object — avoids createDocumentFragment per call (opt #2)
-  // performSwap checks ._xhPatch before using as DOM node; if patching succeeds
-  // the sentinel is never touched as a Node.
-  var _sentinel = { _xhPatch: null, _xhPlan: null, _xhCtx: null };
-
   function renderTemplate(html, ctx) {
     // 1. Parse into fragment, using a cache to avoid re-parsing the same HTML
     //    string on every call.  The cache stores a pristine (un-interpolated)
@@ -2533,13 +2543,9 @@
             var hint = cached._patchHint;
             if (!hint) { hint = { html: html, ctx: null }; cached._patchHint = hint; }
             hint.ctx = ctx;
-            // Reuse sentinel object instead of createDocumentFragment (opt #2)
-            _sentinel._xhPatch = hint;
-            _sentinel._xhPlan = cached.plan;
-            _sentinel._xhCtx = ctx;
-            // Pass ptState to performSwap to avoid redundant patchStates.get (opt #4)
-            _sentinel._xhPtState = ptState;
-            return _sentinel;
+            // Return a new sentinel per call to avoid user event handlers
+            // overwriting shared state between renderTemplate and performSwap
+            return { _xhPatch: hint, _xhPlan: cached.plan, _xhCtx: ctx, _xhPtState: ptState };
           }
         }
         var frag = executePlan(cached.plan, ctx);
@@ -2808,9 +2814,16 @@
       // xh-validate-pattern
       var pattern = field.getAttribute("xh-validate-pattern");
       if (pattern && value) {
-        if (!validationRegexCache[pattern]) validationRegexCache[pattern] = new RegExp(pattern);
+        if (!validationRegexCache[pattern]) {
+          try {
+            validationRegexCache[pattern] = new RegExp(pattern);
+          } catch (regexErr) {
+            if (config.debug) console.warn("[xhtmlx] invalid xh-validate-pattern:", pattern, regexErr);
+            validationRegexCache[pattern] = null;
+          }
+        }
       }
-      if (pattern && value && !validationRegexCache[pattern].test(value)) {
+      if (pattern && value && validationRegexCache[pattern] && !validationRegexCache[pattern].test(value)) {
         error = customMsg || fieldName + " format is invalid";
       }
 
@@ -3475,16 +3488,35 @@
     });
 
     ws.addEventListener("open", function() {
+      // Reset reconnect counter on successful connection
+      var wsS = elementStates.get(el) || {};
+      wsS._wsReconnectAttempt = 0;
+      elementStates.set(el, wsS);
       emitEvent(el, "xh:wsOpen", { url: wsUrl }, false);
     });
 
     ws.addEventListener("close", function(event) {
       emitEvent(el, "xh:wsClose", { code: event.code, reason: event.reason }, false);
-      // Auto-reconnect after 3 seconds if not deliberately closed
+      // Auto-reconnect with exponential backoff if not deliberately closed
       if (event.code !== 1000) {
-        setTimeout(function() {
-          if (el.parentNode) setupWebSocket(el, ctx, templateStack);
-        }, 3000);
+        var wsS = elementStates.get(el) || {};
+        var attempt = (wsS._wsReconnectAttempt || 0) + 1;
+        var maxRetries = 10;
+        if (attempt <= maxRetries) {
+          var delay = Math.min(3000 * Math.pow(2, attempt - 1), 60000);
+          wsS._wsReconnectAttempt = attempt;
+          elementStates.set(el, wsS);
+          setTimeout(function() {
+            if (el.parentNode) setupWebSocket(el, ctx, templateStack);
+          }, delay);
+        } else if (config.debug) {
+          console.warn("[xhtmlx] WebSocket max reconnect attempts reached for", wsUrl);
+        }
+      } else {
+        // Reset reconnect counter on clean close
+        var wsS2 = elementStates.get(el) || {};
+        wsS2._wsReconnectAttempt = 0;
+        elementStates.set(el, wsS2);
       }
     });
 
@@ -3494,7 +3526,7 @@
   }
 
   // For sending messages
-  function setupWsSend(el) {
+  function setupWsSend(el, ctx) {
     var sendTarget = el.getAttribute("xh-ws-send");
     if (!sendTarget) return;
 
@@ -3513,12 +3545,13 @@
       var vals = el.getAttribute("xh-vals");
       if (vals) {
         try {
-          var parsed = JSON.parse(vals);
+          var valsInterpolated = interpolate(vals, ctx, false);
+          var parsed = JSON.parse(valsInterpolated);
           for (var k in parsed) {
-            if (parsed.hasOwnProperty(k)) data[k] = parsed[k];
+            if (Object.prototype.hasOwnProperty.call(parsed, k)) data[k] = parsed[k];
           }
         } catch(e) {
-          // ignore invalid JSON
+          if (config.debug) console.warn("[xhtmlx] invalid JSON in xh-vals (ws-send):", vals, e);
         }
       }
       wsState.ws.send(JSON.stringify(data));
@@ -3547,7 +3580,14 @@
 
   function boostLink(link, ctx) {
     var href = link.getAttribute("href");
-    if (!href || href.indexOf("#") === 0 || href.indexOf("javascript:") === 0 || href.indexOf("mailto:") === 0 || link.getAttribute("target") === "_blank") return;
+    var hrefLower = href ? href.toLowerCase() : "";
+    if (!href || href.indexOf("#") === 0 || hrefLower.indexOf("javascript:") === 0 || hrefLower.indexOf("mailto:") === 0 || link.getAttribute("target") === "_blank") return;
+
+    // Block cross-origin boosted links to prevent leaking cookies
+    try {
+      var parsed = new URL(href, window.location.href);
+      if (parsed.origin !== window.location.origin) return;
+    } catch(_) { return; }
 
     link.setAttribute("data-xh-boosted", "");
     link.addEventListener("click", function(e) {
@@ -3569,11 +3609,12 @@
           // If not JSON, treat as HTML and swap safely via template element
           // (scripts in template content are inert, unlike raw innerHTML)
           cleanupBeforeSwap(target, false);
+          var safeText = config.sanitizeHtml ? config.sanitizeHtml(text) : text;
           if (config.cspSafe) {
-            target.textContent = text;
+            target.textContent = safeText;
           } else {
             var _safeTpl = document.createElement("template");
-            _safeTpl.innerHTML = text;
+            _safeTpl.innerHTML = safeText;
             while (target.firstChild) target.removeChild(target.firstChild);
             target.appendChild(document.importNode(_safeTpl.content, true));
           }
@@ -3595,14 +3636,14 @@
           applyBindings(target, childCtx);
           processBindingsInTree(target, childCtx);
         }
+      }).then(function() {
+        // Push URL only after successful fetch
+        if (typeof history !== "undefined" && history.pushState) {
+          history.pushState({ xhtmlx: true, url: href }, "", href);
+        }
       }).finally(function() {
         hideIndicator(boostContainer);
       });
-
-      // Push URL
-      if (typeof history !== "undefined" && history.pushState) {
-        history.pushState({ xhtmlx: true, url: href }, "", href);
-      }
     });
   }
 
@@ -3616,10 +3657,15 @@
       e.preventDefault();
       var body = formDataToObject(form);
 
+      var fetchUrl = action;
       var fetchOpts = { method: method, headers: {} };
       if (method !== "GET") {
         fetchOpts.headers["Content-Type"] = "application/json";
         fetchOpts.body = JSON.stringify(body);
+      } else {
+        // Append form data as query parameters for GET requests
+        var qs = new URLSearchParams(body).toString();
+        if (qs) fetchUrl += (fetchUrl.indexOf("?") === -1 ? "?" : "&") + qs;
       }
 
       var boostContainer = form.closest("[xh-boost]");
@@ -3627,7 +3673,7 @@
       var target = document.querySelector(boostTarget);
       if (!target) target = form;
 
-      fetch(action, fetchOpts).then(function(response) {
+      fetch(fetchUrl, fetchOpts).then(function(response) {
         return response.text();
       }).then(function(text) {
         var jsonData;
@@ -3973,7 +4019,7 @@
       elementStates.set(el, wState);
     }
     if (el.hasAttribute("xh-ws-send")) {
-      setupWsSend(el);
+      setupWsSend(el, ctx);
     }
 
     if (el.hasAttribute("xh-boost")) {
@@ -4256,17 +4302,21 @@
           var paramNames = [];
           var regexStr = route.path.replace(/:([^/]+)/g, function(_, name) {
             paramNames.push(name);
-            return "([^/]+)";
+            return "\x00PARAM\x00";
           });
+          // Escape regex metacharacters in the literal parts, then restore param groups
+          regexStr = regexStr.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+                             .replace(/\x00PARAM\x00/g, "([^/]+)");
           route.regex = new RegExp("^" + regexStr + "$");
           route.paramNames = paramNames;
           router._routes.push(route);
 
-          // Click handler
+          // Click handler — use the element's href if available, otherwise the literal path
           (function(r) {
             r.element.addEventListener("click", function(e) {
               e.preventDefault();
-              router.navigate(r.path);
+              var navPath = r.element.getAttribute("href") || r.path;
+              router.navigate(navPath);
             });
           })(route);
         }
@@ -4329,6 +4379,9 @@
                   processNode(router._outlet, childCtx, []);
                 });
               }
+            }).catch(function(err) {
+              if (config.debug) console.error("[xhtmlx] router fetch failed for", url, err);
+              emitEvent(router._outlet || document.body, "xh:routeError", { url: url, error: err }, false);
             });
           } else if (route.template) {
             fetchTemplate(route.template).then(function(html) {
@@ -4375,6 +4428,7 @@
    */
   function collectBindingState(target, ctx, html) {
     var bindings = [];
+    var hasEach = false;
     var tw = document.createTreeWalker(target, 1 /* SHOW_ELEMENT */);
     while (tw.nextNode()) {
       var el = tw.currentNode;
@@ -4383,6 +4437,7 @@
 
       for (var i = 0; i < attrs.length; i++) {
         var name = attrs[i].name;
+        if (name === "xh-each") { hasEach = true; }
         if (name.charCodeAt(0) !== 120 || name.charCodeAt(1) !== 104 ||
             name.charCodeAt(2) !== 45) continue;
 
@@ -4431,7 +4486,7 @@
       }
     }
 
-    return { html: html, bindings: bindings, interpNodes: interpNodes, ctx: ctx };
+    return { html: html, bindings: bindings, interpNodes: interpNodes, ctx: ctx, hasEach: hasEach };
   }
 
   /**
@@ -4443,6 +4498,8 @@
    * @returns {boolean} true if patching succeeded, false if full re-render needed.
    */
   function patchBindings(state, ctx) {
+    // xh-each requires full re-render since array items may have changed
+    if (state.hasEach) return false;
     var bindings = state.bindings;
     for (var i = 0; i < bindings.length; i++) {
       var entry = bindings[i];
@@ -4738,7 +4795,7 @@
     },
 
     /** Internal version string */
-    version: "0.3.0",
+    version: "0.3.1",
 
     // --- Internals exposed for testing (not part of the public API) ----------
     _internals: {

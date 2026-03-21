@@ -174,6 +174,7 @@ describe("Boost integration flow", () => {
 
     var link = document.querySelector("a");
     link.dispatchEvent(new Event("click", { bubbles: true, cancelable: true }));
+    await flushPromises();
 
     expect(window.history.pushState).toHaveBeenCalledWith(
       expect.objectContaining({ xhtmlx: true, url: "/new-page" }),
