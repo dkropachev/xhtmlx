@@ -2,22 +2,11 @@
  * @jest-environment jsdom
  */
 
-const { bench, benchAsync } = require('./bench-helper');
+const { bench } = require('./bench-helper');
 const xhtmlx = require('../../xhtmlx.js');
 const {
-  DataContext, processElement, processBindingsInTree,
-  applyBindings, elementStates
+  DataContext, processBindingsInTree
 } = xhtmlx._internals;
-
-// Helper to clear processed flags so elements can be re-processed
-function clearProcessed(root) {
-  const walker = document.createTreeWalker(root, 1);
-  let node = walker.currentNode;
-  while (node) {
-    elementStates.delete(node);
-    node = walker.nextNode();
-  }
-}
 
 describe('Benchmark: DOM processing', () => {
   beforeEach(() => {
