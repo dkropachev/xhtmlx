@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - 2026-03-21
+
+### Security
+- Apply `sanitizeHtml` hook in plan-based and DOM-patching innerHTML paths (XSS fix)
+- Add cross-origin validation to `boostForm` and `popstateHandler` (prevents cookie leaking)
+- Mitigate ReDoS in `xh-validate-pattern` by capping tested input length
+
+### Fixed
+- Evict failed template fetches from cache (rejected promises no longer persist)
+- Null-guard `closest("[xh-boost]")` in boost link and form handlers
+- CSP-safe child clearing in router, boost, and popstate code paths
+- Add `.catch()` handler to router 404 template fetch
+- Clear `pathSplitCache` and `triggerSpecCache` on version switch
+- Bounds-check `navigatePath` to prevent TypeError on DOM mutations
+- Log errors in `popstateHandler` and `boostForm` instead of silently swallowing
+- Skip `File` inputs in `formDataToObject` (prevents `[object File]` in JSON body)
+- Clean up old WebSocket handlers before reconnect (prevents listener accumulation)
+- Clear all caches (`pathSplitCache`, `triggerSpecCache`, `validationRegexCache`) in `destroy()`
+- Bound `triggerSpecCache` (500 max) and `validationRegexCache` (200 max) to prevent memory leaks
+
+### Added
+- Logo and favicon (Concept 4: X-in-a-Tag) integrated into docs site
+- `logos/` directory with dark/light logo, icon, favicon, and social preview SVGs
+
+### Changed
+- Upgrade React devDependency from 18.3 to 19.2 for benchmark comparisons
+- Updated benchmark results across README and docs site
+
 ## [0.3.1] - 2026-03-19
 
 ### Performance

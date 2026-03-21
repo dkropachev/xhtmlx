@@ -4867,7 +4867,7 @@
     },
 
     /** Internal version string */
-    version: "0.3.1",
+    version: "0.4.0",
 
     // --- Internals exposed for testing (not part of the public API) ----------
     _internals: {
