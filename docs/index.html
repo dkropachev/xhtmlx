@@ -22,6 +22,8 @@
 <meta property="twitter:description" content="Like htmx, but your server returns JSON and the browser renders the UI. Zero dependencies, ~16KB gzipped.">
 <meta property="twitter:image" content="https://teryxjs.github.io/xhtmlx/og-image.png">
 
+<!-- Favicon -->
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
 <!-- Canonical -->
 <link rel="canonical" href="https://teryxjs.github.io/xhtmlx/">
 <style>
@@ -198,6 +200,9 @@ img { max-width: 100%; }
   height: 64px;
 }
 .nav-logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-family: var(--font-mono);
   font-size: 1.3rem;
   font-weight: 800;
@@ -206,6 +211,14 @@ img { max-width: 100%; }
   -webkit-text-fill-color: transparent;
   background-clip: text;
   letter-spacing: -0.02em;
+}
+.nav-logo-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  /* gradient icon doesn't use text clip, reset */
+  -webkit-text-fill-color: initial;
 }
 .nav-links {
   display: flex;
@@ -342,6 +355,11 @@ img { max-width: 100%; }
   letter-spacing: -0.04em;
   line-height: 1.05;
   margin-bottom: 20px;
+}
+.hero-logo-icon {
+  vertical-align: middle;
+  margin-right: 12px;
+  border-radius: 16px;
 }
 .hero-title-gradient {
   background: var(--gradient-accent);
@@ -1077,6 +1095,9 @@ img { max-width: 100%; }
   gap: 16px;
 }
 .footer-logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-family: var(--font-mono);
   font-weight: 800;
   font-size: 1.1rem;
@@ -1084,6 +1105,13 @@ img { max-width: 100%; }
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+}
+.footer-logo-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  flex-shrink: 0;
+  -webkit-text-fill-color: initial;
 }
 .footer-copy {
   font-size: 0.82rem;
@@ -1847,7 +1875,7 @@ html[data-theme="light"] .syn-kw { color: #9333ea; font-weight: 600; }
 <!-- ==================== Navigation ==================== -->
 <nav class="nav" id="nav">
   <div class="nav-inner">
-    <a href="#" class="nav-logo">xhtmlx</a>
+    <a href="#" class="nav-logo"><svg class="nav-logo-icon" viewBox="0 0 128 128"><defs><linearGradient id="nlg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#7c3aed"/><stop offset="100%" stop-color="#3b82f6"/></linearGradient></defs><rect width="128" height="128" rx="24" fill="url(#nlg)"/><g transform="translate(64,64)"><path d="M-32,-36 L0,-8 L32,-36" stroke="#fff" stroke-width="10" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M-32,36 L0,8 L32,36" stroke="#fff" stroke-width="10" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="0" cy="0" r="5" fill="#fff"/></g></svg>xhtmlx</a>
     <button class="nav-toggle" id="navToggle" aria-label="Toggle navigation">
       <span></span><span></span><span></span>
     </button>
@@ -1884,6 +1912,7 @@ html[data-theme="light"] .syn-kw { color: #9333ea; font-weight: 600; }
       </div>
     </div>
     <h1 class="hero-title fade-in fade-in-delay-1">
+      <svg class="hero-logo-icon" viewBox="0 0 128 128" width="80" height="80"><defs><linearGradient id="hlg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#7c3aed"/><stop offset="100%" stop-color="#3b82f6"/></linearGradient></defs><rect width="128" height="128" rx="24" fill="url(#hlg)"/><g transform="translate(64,64)"><path d="M-32,-36 L0,-8 L32,-36" stroke="#fff" stroke-width="10" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M-32,36 L0,8 L32,36" stroke="#fff" stroke-width="10" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="0" cy="0" r="5" fill="#fff"/></g></svg>
       <span class="hero-title-gradient">xhtmlx</span>
     </h1>
     <p class="hero-tagline fade-in fade-in-delay-2">REST APIs meet declarative HTML</p>
@@ -3485,7 +3514,7 @@ html[data-theme="light"] .syn-kw { color: #9333ea; font-weight: 600; }
   <div class="container">
     <div class="footer-inner">
       <div class="footer-brand">
-        <span class="footer-logo">xhtmlx</span>
+        <span class="footer-logo"><svg class="footer-logo-icon" viewBox="0 0 128 128"><defs><linearGradient id="flg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#7c3aed"/><stop offset="100%" stop-color="#3b82f6"/></linearGradient></defs><rect width="128" height="128" rx="24" fill="url(#flg)"/><g transform="translate(64,64)"><path d="M-32,-36 L0,-8 L32,-36" stroke="#fff" stroke-width="10" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M-32,36 L0,8 L32,36" stroke="#fff" stroke-width="10" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="0" cy="0" r="5" fill="#fff"/></g></svg>xhtmlx</span>
         <span class="footer-copy">MIT License</span>
       </div>
       <ul class="footer-links">
