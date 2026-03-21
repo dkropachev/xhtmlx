@@ -802,7 +802,7 @@ xhtmlx's `render()` API patches only changed DOM bindings in place — no virtua
 | Render + swap pipeline | **xhtmlx** | **26–20,493x faster** |
 | Bundle size | **xhtmlx** | 2.7x smaller (~17KB vs ~46KB+) |
 
-> Benchmarks: `tests/benchmark/` — React 19.2, xhtmlx 0.3.1, JSDOM, 3 runs averaged.
+> Benchmarks: `tests/benchmark/` — React 19.2, xhtmlx 0.4.0, JSDOM, 3 runs averaged.
 
 ## Migration
 
