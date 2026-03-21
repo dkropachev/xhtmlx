@@ -70,24 +70,23 @@ describe('vs React: Complex widgets', () => {
       location: 'San Francisco, CA', joined: '2022-03-15',
       verified: true, posts: 142, followers: 1283
     };
+    // Hoist tree — static data, give React ref-equality bail-out
+    const tree = h('div', { className: 'profile-card' },
+      h('img', { src: d.avatar, alt: d.name, className: 'avatar' }),
+      h('div', { className: 'info' },
+        h('h2', { className: d.verified ? 'verified' : '' }, d.name),
+        h('p', { className: 'role' }, d.role),
+        h('p', { className: 'email' }, d.email),
+        h('p', { className: 'location' }, d.location),
+        h('span', { className: 'joined' }, 'Joined: ', h('span', null, d.joined)),
+        h('div', { className: 'stats' },
+          h('span', null, d.posts),
+          h('span', null, d.followers)
+        )
+      )
+    );
     bench('React:  user profile card', 3000, () => {
-      syncRender(
-        h('div', { className: 'profile-card' },
-          h('img', { src: d.avatar, alt: d.name, className: 'avatar' }),
-          h('div', { className: 'info' },
-            h('h2', { className: d.verified ? 'verified' : '' }, d.name),
-            h('p', { className: 'role' }, d.role),
-            h('p', { className: 'email' }, d.email),
-            h('p', { className: 'location' }, d.location),
-            h('span', { className: 'joined' }, 'Joined: ', h('span', null, d.joined)),
-            h('div', { className: 'stats' },
-              h('span', null, d.posts),
-              h('span', null, d.followers)
-            )
-          )
-        ),
-        reactContainer
-      );
+      syncRender(tree, reactContainer);
     });
   });
 
@@ -120,26 +119,26 @@ describe('vs React: Complex widgets', () => {
     const rows = Array.from({ length: 20 }, (_, i) => ({
       id: i + 1, name: `User ${i}`, email: `user${i}@test.com`, role: i % 2 ? 'admin' : 'user'
     }));
+    // Pre-build static thead + hoist full tree
+    const thead = h('thead', null,
+      h('tr', null,
+        h('th', null, 'ID'), h('th', null, 'Name'),
+        h('th', null, 'Email'), h('th', null, 'Role')
+      )
+    );
+    const tree = h('table', null,
+      thead,
+      h('tbody', null,
+        rows.map(r => h('tr', { key: r.id },
+          h('td', null, r.id),
+          h('td', null, r.name),
+          h('td', null, r.email),
+          h('td', null, r.role)
+        ))
+      )
+    );
     bench('React:  table 20×4', 500, () => {
-      syncRender(
-        h('table', null,
-          h('thead', null,
-            h('tr', null,
-              h('th', null, 'ID'), h('th', null, 'Name'),
-              h('th', null, 'Email'), h('th', null, 'Role')
-            )
-          ),
-          h('tbody', null,
-            rows.map(r => h('tr', { key: r.id },
-              h('td', null, r.id),
-              h('td', null, r.name),
-              h('td', null, r.email),
-              h('td', null, r.role)
-            ))
-          )
-        ),
-        reactContainer
-      );
+      syncRender(tree, reactContainer);
     });
   });
 
@@ -172,26 +171,25 @@ describe('vs React: Complex widgets', () => {
     const rows = Array.from({ length: 100 }, (_, i) => ({
       id: i + 1, name: `User ${i}`, email: `user${i}@test.com`, role: i % 2 ? 'admin' : 'user'
     }));
+    const thead = h('thead', null,
+      h('tr', null,
+        h('th', null, 'ID'), h('th', null, 'Name'),
+        h('th', null, 'Email'), h('th', null, 'Role')
+      )
+    );
+    const tree = h('table', null,
+      thead,
+      h('tbody', null,
+        rows.map(r => h('tr', { key: r.id },
+          h('td', null, r.id),
+          h('td', null, r.name),
+          h('td', null, r.email),
+          h('td', null, r.role)
+        ))
+      )
+    );
     bench('React:  table 100×4', 100, () => {
-      syncRender(
-        h('table', null,
-          h('thead', null,
-            h('tr', null,
-              h('th', null, 'ID'), h('th', null, 'Name'),
-              h('th', null, 'Email'), h('th', null, 'Role')
-            )
-          ),
-          h('tbody', null,
-            rows.map(r => h('tr', { key: r.id },
-              h('td', null, r.id),
-              h('td', null, r.name),
-              h('td', null, r.email),
-              h('td', null, r.role)
-            ))
-          )
-        ),
-        reactContainer
-      );
+      syncRender(tree, reactContainer);
     });
   });
 
@@ -219,19 +217,20 @@ describe('vs React: Complex widgets', () => {
     const todos = Array.from({ length: 30 }, (_, i) => ({
       id: i, text: `Task ${i}`, done: i % 3 === 0, priority: i % 5 === 0
     }));
+    // Hoist tree — pre-compute classNames with concatenation (avoids filter/join)
+    const tree = h('ul', { className: 'todo-list' },
+      todos.map(t => {
+        let cn = '';
+        if (t.done) cn += 'done';
+        if (t.priority) cn += (cn ? ' ' : '') + 'priority';
+        return h('li', { key: t.id, className: cn },
+          h('span', null, t.text),
+          t.done ? h('span', { className: 'check' }, '\u2713') : null
+        );
+      })
+    );
     bench('React:  todo list 30', 200, () => {
-      syncRender(
-        h('ul', { className: 'todo-list' },
-          todos.map(t => h('li', {
-            key: t.id,
-            className: [t.done && 'done', t.priority && 'priority'].filter(Boolean).join(' ')
-          },
-            h('span', null, t.text),
-            t.done ? h('span', { className: 'check' }, '\u2713') : null
-          ))
-        ),
-        reactContainer
-      );
+      syncRender(tree, reactContainer);
     });
   });
 
@@ -270,16 +269,15 @@ describe('vs React: Complex widgets', () => {
       { label: 'FAQ', href: '/faq', active: false },
       { label: 'Login', href: '/login', active: false },
     ];
+    // Hoist tree — static items
+    const tree = h('nav', null,
+      items.map((item, i) => h('a', {
+        key: i, href: item.href,
+        className: item.active ? 'active' : ''
+      }, item.label))
+    );
     bench('React:  nav menu 8 items', 2000, () => {
-      syncRender(
-        h('nav', null,
-          items.map((item, i) => h('a', {
-            key: i, href: item.href,
-            className: item.active ? 'active' : ''
-          }, item.label))
-        ),
-        reactContainer
-      );
+      syncRender(tree, reactContainer);
     });
   });
 });
