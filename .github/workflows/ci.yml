@@ -7,8 +7,8 @@ on:
     branches: [main]
 
 jobs:
-  lint:
-    name: Lint
+  lint-and-build:
+    name: Lint & Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,7 +16,18 @@ jobs:
         with:
           node-version: 20
           cache: npm
-      - run: make ci-lint
+      - run: npm ci
+      - run: node --check xhtmlx.js
+      - run: npx eslint xhtmlx.js tests/ --ext .js
+      - run: npx terser xhtmlx.js -o xhtmlx.min.js --compress --mangle --source-map "filename='xhtmlx.min.js.map',url='xhtmlx.min.js.map'"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: |
+            xhtmlx.js
+            xhtmlx.min.js
+            xhtmlx.min.js.map
+          retention-days: 30
 
   test:
     name: Test (Node ${{ matrix.node-version }})
@@ -30,10 +41,11 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
-      - run: make ci-test
+      - run: npm ci
+      - run: npx jest --verbose --forceExit
       - name: Run tests with coverage
         if: matrix.node-version == 20
-        run: make test-coverage
+        run: npx jest --coverage --verbose --forceExit
       - name: Upload coverage
         if: matrix.node-version == 20
         uses: actions/upload-artifact@v4
@@ -51,7 +63,17 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: make ci-browser
+      - run: npm ci
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Install Playwright Chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install chromium
+      - run: npx playwright test
       - name: Upload test results
         if: failure()
         uses: actions/upload-artifact@v4
@@ -59,23 +81,3 @@ jobs:
           name: playwright-report
           path: test-results/
           retention-days: 7
-
-  build:
-    name: Build
-    needs: [lint, test, browser-test]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-      - run: make ci-build
-      - uses: actions/upload-artifact@v4
-        with:
-          name: dist
-          path: |
-            xhtmlx.js
-            xhtmlx.min.js
-            xhtmlx.min.js.map
-          retention-days: 30

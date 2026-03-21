@@ -5,8 +5,8 @@ on:
     types: [published]
 
 jobs:
-  publish:
-    name: Publish
+  verify-and-publish:
+    name: Verify & Publish
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -18,9 +18,11 @@ jobs:
           node-version: 22
           cache: npm
           registry-url: https://registry.npmjs.org
-      - run: make ci-publish
-      - name: Publish with OIDC trusted publisher
-        run: |
-          npm install -g npm@latest
-          sed -i '/_authToken/d' $NPM_CONFIG_USERCONFIG 2>/dev/null || true
-          npm publish --provenance --access public
+      - run: npm ci
+      - run: node --check xhtmlx.js
+      - run: npx eslint xhtmlx.js tests/ --ext .js
+      - run: npx jest --verbose --forceExit
+      - run: npx terser xhtmlx.js -o xhtmlx.min.js --compress --mangle --source-map "filename='xhtmlx.min.js.map',url='xhtmlx.min.js.map'"
+      - run: npm pack --dry-run
+      - name: Publish with OIDC provenance
+        run: npm publish --provenance --access public
