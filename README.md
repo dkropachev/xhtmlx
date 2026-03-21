@@ -769,37 +769,37 @@ xhtmlx is benchmarked head-to-head against React 19 on every release. The number
 
 | Scenario | xhtmlx | React 19 | Winner |
 |---|---:|---:|---|
-| 1 text — changing data | **20.12M ops/s** | 64.0K ops/s | **xhtmlx 314x** |
-| 1 text — same data (noop) | **15.52M ops/s** | 43.4K ops/s | **xhtmlx 358x** |
-| 5 text — same data (noop) | **41.36M ops/s** | 152.5K ops/s | **xhtmlx 271x** |
-| 10 text — changing data | **1.44M ops/s** | 13.2K ops/s | **xhtmlx 109x** |
-| Card — changing data | **7.51M ops/s** | 32.6K ops/s | **xhtmlx 230x** |
-| Card — same data (noop) | **23.95M ops/s** | 37.5K ops/s | **xhtmlx 639x** |
-| Conditional — same (noop) | **24.71M ops/s** | 52.6K ops/s | **xhtmlx 470x** |
-| Profile — same (noop) | **24.51M ops/s** | 27.6K ops/s | **xhtmlx 888x** |
+| 1 text — changing data | **22.05M ops/s** | 68.4K ops/s | **xhtmlx 322x** |
+| 1 text — same data (noop) | **17.37M ops/s** | 56.3K ops/s | **xhtmlx 308x** |
+| 5 text — same data (noop) | **43.65M ops/s** | 160.1K ops/s | **xhtmlx 272x** |
+| 10 text — changing data | **1.63M ops/s** | 14.5K ops/s | **xhtmlx 112x** |
+| Card — changing data | **7.93M ops/s** | 29.2K ops/s | **xhtmlx 271x** |
+| Card — same data (noop) | **20.97M ops/s** | 36.0K ops/s | **xhtmlx 582x** |
+| Conditional — same (noop) | **19.36M ops/s** | 51.4K ops/s | **xhtmlx 376x** |
+| Profile — same (noop) | **22.03M ops/s** | 29.7K ops/s | **xhtmlx 741x** |
 
-xhtmlx's `render()` API patches only changed DOM bindings in place — no virtual DOM diff, no reconciliation, no tree walk. This is where the library shines for polling, WebSocket streams, and reactive state updates: **109–888x faster** than React.
+xhtmlx's `render()` API patches only changed DOM bindings in place — no virtual DOM diff, no reconciliation, no tree walk. This is where the library shines for polling, WebSocket streams, and reactive state updates: **112–741x faster** than React.
 
 ### Render + Swap — renderTemplate + performSwap pipeline
 
 | Scenario | xhtmlx | React 19 | Winner |
 |---|---:|---:|---|
-| Single text binding | **2.17M ops/s** | 38.4K ops/s | **xhtmlx 57x** |
-| 5 text bindings | **1.94M ops/s** | 70.9K ops/s | **xhtmlx 27x** |
-| Conditional render | **1.22M ops/s** | 15.8K ops/s | **xhtmlx 77x** |
-| User profile card | **1.58M ops/s** | 10.0K ops/s | **xhtmlx 158x** |
-| List — 100 items | **2.01M ops/s** | 868 ops/s | **xhtmlx 2,315x** |
-| List — 500 items | **1.83M ops/s** | 217 ops/s | **xhtmlx 8,433x** |
-| List — 1,000 items | **1.71M ops/s** | 112 ops/s | **xhtmlx 15,268x** |
+| Single text binding | **1.70M ops/s** | 90.9K ops/s | **xhtmlx 19x** |
+| 5 text bindings | **2.23M ops/s** | 102.0K ops/s | **xhtmlx 22x** |
+| Conditional render | **1.79M ops/s** | 83.3K ops/s | **xhtmlx 22x** |
+| User profile card | **1.54M ops/s** | 63.6K ops/s | **xhtmlx 24x** |
+| List — 100 items | **2.09M ops/s** | 62.3K ops/s | **xhtmlx 34x** |
+| List — 500 items | **1.68M ops/s** | 81.7K ops/s | **xhtmlx 21x** |
+| List — 1,000 items | **2.03M ops/s** | 99.2K ops/s | **xhtmlx 20x** |
 
-`performSwap` now auto-patches when the same template is re-rendered into the same target — the DOM is never rebuilt, only changed bindings are updated. Combined with lazy fragment construction, the full pipeline matches `render()` speed: **27–15,268x faster** than React.
+Both sides benefit from caching when re-rendering the same data: xhtmlx auto-patches via data identity, React bails via element reference equality. The gap measures the overhead difference between `flushSync` scheduling and xhtmlx's direct identity check: **19–34x faster** than React.
 
 ### Summary
 
 | Category | Winner | Magnitude |
 |---|---|---|
-| Re-render / patching (`render()`) | **xhtmlx** | **109–888x faster** |
-| Render + swap pipeline | **xhtmlx** | **27–15,268x faster** |
+| Re-render / patching (`render()`) | **xhtmlx** | **112–741x faster** |
+| Render + swap pipeline | **xhtmlx** | **19–34x faster** |
 | Bundle size | **xhtmlx** | 2.7x smaller (~17KB vs ~46KB+) |
 
 > Benchmarks: `tests/benchmark/` — React 19.2, xhtmlx 0.3.1, JSDOM, 3 runs averaged.

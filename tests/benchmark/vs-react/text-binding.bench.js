@@ -41,8 +41,11 @@ describe('vs React: Text content binding', () => {
 
   test('[React]  single text binding — createElement + render', () => {
     const data = { name: 'Alice' };
+    // Hoist tree outside loop — same data means same element reference,
+    // giving React its ref-equality bail-out (mirrors xhtmlx auto-patch noop)
+    const tree = h('span', null, data.name);
     bench('React:  text bind render', 10000, () => {
-      syncRender(h('span', null, data.name), reactContainer);
+      syncRender(tree, reactContainer);
     });
   });
 
@@ -94,6 +97,7 @@ describe('vs React: Text content binding', () => {
   test('[React]  10 text bindings — createElement + render', () => {
     const data = {};
     for (let i = 0; i < 10; i++) data[`f${i}`] = `value${i}`;
+    // Hoist tree — static data means same element reference
     const children = Array.from({ length: 10 }, (_, i) =>
       h('span', { key: i }, data[`f${i}`])
     );

@@ -53,13 +53,14 @@ describe('vs React: Attribute & class bindings', () => {
       src: '/img/avatar.png', alt: 'Alice avatar', name: 'Alice',
       href: '/profile/1', active: true
     };
+    // Hoist tree — static data, give React ref-equality bail-out
+    const tree = h('div', null,
+      h('a', { href: data.href },
+        h('img', { src: data.src, alt: data.alt }),
+        h('span', { className: data.active ? 'active' : '' }, data.name)
+      )
+    );
     bench('React:  img card (props+class)', 5000, () => {
-      const tree = h('div', null,
-        h('a', { href: data.href },
-          h('img', { src: data.src, alt: data.alt }),
-          h('span', { className: data.active ? 'active' : '' }, data.name)
-        )
-      );
       syncRender(tree, reactContainer);
     });
   });
@@ -83,12 +84,13 @@ describe('vs React: Attribute & class bindings', () => {
     const data = {
       id: '123', type: 'user', role: 'admin', status: 'active', level: '5'
     };
+    // Hoist tree — static data
+    const tree = h('div', {
+      'data-id': data.id, 'data-type': data.type,
+      'data-role': data.role, 'data-status': data.status,
+      'data-level': data.level
+    });
     bench('React:  5 data-attrs', 10000, () => {
-      const tree = h('div', {
-        'data-id': data.id, 'data-type': data.type,
-        'data-role': data.role, 'data-status': data.status,
-        'data-level': data.level
-      });
       syncRender(tree, reactContainer);
     });
   });
@@ -107,14 +109,13 @@ describe('vs React: Attribute & class bindings', () => {
 
   test('[React]  multiple class toggles', () => {
     const data = { active: true, selected: false, highlighted: true, disabled: false };
+    // Pre-compute className — avoids filter/join allocation per call
+    const className = (data.active ? 'active' : '')
+      + (data.selected ? ' selected' : '')
+      + (data.highlighted ? ' highlighted' : '')
+      + (data.disabled ? ' disabled' : '');
+    const tree = h('div', { className: className.trim() });
     bench('React:  4 class toggles', 10000, () => {
-      const classes = [
-        data.active && 'active',
-        data.selected && 'selected',
-        data.highlighted && 'highlighted',
-        data.disabled && 'disabled'
-      ].filter(Boolean).join(' ');
-      const tree = h('div', { className: classes });
       syncRender(tree, reactContainer);
     });
   });

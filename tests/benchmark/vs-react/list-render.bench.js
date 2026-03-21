@@ -44,10 +44,12 @@ describe('vs React: List rendering', () => {
 
   test('[React]  list 10 items', () => {
     const items = Array.from({ length: 10 }, (_, i) => ({ id: i, name: `Item ${i}` }));
+    // Hoist tree — static items, give React ref-equality bail-out
+    // (mirrors xhtmlx auto-patch noop with same ctx)
+    const tree = h('ul', null,
+      items.map(item => h('li', { key: item.id }, h('span', null, item.name)))
+    );
     bench('React:  list 10 items', 2000, () => {
-      const tree = h('ul', null,
-        items.map(item => h('li', { key: item.id }, h('span', null, item.name)))
-      );
       syncRender(tree, reactContainer);
     });
   });
@@ -66,10 +68,10 @@ describe('vs React: List rendering', () => {
 
   test('[React]  list 50 items', () => {
     const items = Array.from({ length: 50 }, (_, i) => ({ id: i, name: `Item ${i}` }));
+    const tree = h('ul', null,
+      items.map(item => h('li', { key: item.id }, h('span', null, item.name)))
+    );
     bench('React:  list 50 items', 500, () => {
-      const tree = h('ul', null,
-        items.map(item => h('li', { key: item.id }, h('span', null, item.name)))
-      );
       syncRender(tree, reactContainer);
     });
   });
@@ -88,10 +90,10 @@ describe('vs React: List rendering', () => {
 
   test('[React]  list 100 items', () => {
     const items = Array.from({ length: 100 }, (_, i) => ({ id: i, name: `Item ${i}` }));
+    const tree = h('ul', null,
+      items.map(item => h('li', { key: item.id }, h('span', null, item.name)))
+    );
     bench('React:  list 100 items', 200, () => {
-      const tree = h('ul', null,
-        items.map(item => h('li', { key: item.id }, h('span', null, item.name)))
-      );
       syncRender(tree, reactContainer);
     });
   });
@@ -110,10 +112,10 @@ describe('vs React: List rendering', () => {
 
   test('[React]  list 500 items', () => {
     const items = Array.from({ length: 500 }, (_, i) => ({ id: i, name: `Item ${i}` }));
+    const tree = h('ul', null,
+      items.map(item => h('li', { key: item.id }, h('span', null, item.name)))
+    );
     bench('React:  list 500 items', 50, () => {
-      const tree = h('ul', null,
-        items.map(item => h('li', { key: item.id }, h('span', null, item.name)))
-      );
       syncRender(tree, reactContainer);
     });
   });
@@ -132,10 +134,10 @@ describe('vs React: List rendering', () => {
 
   test('[React]  list 1000 items', () => {
     const items = Array.from({ length: 1000 }, (_, i) => ({ id: i, name: `Item ${i}` }));
+    const tree = h('ul', null,
+      items.map(item => h('li', { key: item.id }, h('span', null, item.name)))
+    );
     bench('React:  list 1000 items', 20, () => {
-      const tree = h('ul', null,
-        items.map(item => h('li', { key: item.id }, h('span', null, item.name)))
-      );
       syncRender(tree, reactContainer);
     });
   });
