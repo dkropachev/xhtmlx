@@ -24,7 +24,7 @@
     "test:unit": "jest tests/unit --verbose",
     "test:integration": "jest tests/integration --verbose",
     "test:browser": "npx playwright test",
-    "lint": "eslint xhtmlx.js tests/ --ext .js",
+    "lint": "eslint xhtmlx.js tests/ --ext .js --max-warnings 0",
     "check": "node --check xhtmlx.js",
     "build": "npx terser xhtmlx.js -o xhtmlx.min.js --compress --mangle --source-map \"filename='xhtmlx.min.js.map',url='xhtmlx.min.js.map'\"",
     "prepublishOnly": "npm run check && npm run lint && npm test && npm run build",
