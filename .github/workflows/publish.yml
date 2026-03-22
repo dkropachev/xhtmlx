@@ -17,11 +17,19 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          registry-url: https://registry.npmjs.org
       - run: npm ci
       - run: node --check xhtmlx.js
       - run: npx eslint xhtmlx.js tests/ --ext .js --max-warnings 0
       - run: npx jest --verbose --forceExit
       - run: npx terser xhtmlx.js -o xhtmlx.min.js --compress --mangle --source-map "filename='xhtmlx.min.js.map',url='xhtmlx.min.js.map'"
       - run: npm pack --dry-run
+      - name: Debug auth config
+        run: |
+          echo "npm version: $(npm --version)"
+          echo "node version: $(node --version)"
+          echo "npmrc contents (redacted):"
+          sed 's/_authToken=.*/_authToken=REDACTED/' "$NPM_CONFIG_USERCONFIG" 2>/dev/null || echo "no npmrc"
+          echo "NODE_AUTH_TOKEN set: ${NODE_AUTH_TOKEN:+yes}"
       - name: Publish with provenance
-        run: npm publish --provenance --access public
+        run: npm publish --provenance --access public --loglevel verbose
