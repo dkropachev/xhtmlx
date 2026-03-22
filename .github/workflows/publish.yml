@@ -24,8 +24,7 @@ jobs:
       - run: npx jest --verbose --forceExit
       - run: npx terser xhtmlx.js -o xhtmlx.min.js --compress --mangle --source-map "filename='xhtmlx.min.js.map',url='xhtmlx.min.js.map'"
       - run: npm pack --dry-run
-      - name: Publish with OIDC provenance
-        run: |
-          npm install -g npm@latest
-          sed -i '/_authToken/d' "$NPM_CONFIG_USERCONFIG" 2>/dev/null || true
-          npm publish --provenance --access public
+      - name: Publish with provenance
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
