@@ -20,7 +20,7 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: npm ci
       - run: node --check xhtmlx.js
-      - run: npx eslint xhtmlx.js tests/ --ext .js
+      - run: npx eslint xhtmlx.js tests/ --ext .js --max-warnings 0
       - run: npx jest --verbose --forceExit
       - run: npx terser xhtmlx.js -o xhtmlx.min.js --compress --mangle --source-map "filename='xhtmlx.min.js.map',url='xhtmlx.min.js.map'"
       - run: npm pack --dry-run

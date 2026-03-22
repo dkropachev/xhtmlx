@@ -18,7 +18,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: node --check xhtmlx.js
-      - run: npx eslint xhtmlx.js tests/ --ext .js
+      - run: npx eslint xhtmlx.js tests/ --ext .js --max-warnings 0
       - run: npx terser xhtmlx.js -o xhtmlx.min.js --compress --mangle --source-map "filename='xhtmlx.min.js.map',url='xhtmlx.min.js.map'"
       - uses: actions/upload-artifact@v4
         with:
