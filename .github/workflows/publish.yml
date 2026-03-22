@@ -26,5 +26,6 @@ jobs:
       - run: npm pack --dry-run
       - name: Publish with provenance
         run: |
+          npm install -g npm@latest
           sed -i '/_authToken/d' "$NPM_CONFIG_USERCONFIG" 2>/dev/null || true
           npm publish --provenance --access public --ignore-scripts
