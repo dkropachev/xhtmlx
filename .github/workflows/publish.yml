@@ -12,8 +12,8 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -26,6 +26,5 @@ jobs:
       - run: npm pack --dry-run
       - name: Publish with provenance
         run: |
-          npm install -g npm@latest
           sed -i '/_authToken/d' "$NPM_CONFIG_USERCONFIG" 2>/dev/null || true
           npm publish --provenance --access public --ignore-scripts
