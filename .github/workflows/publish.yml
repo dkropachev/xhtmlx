@@ -24,12 +24,9 @@ jobs:
       - run: npx jest --verbose --forceExit
       - run: npx terser xhtmlx.js -o xhtmlx.min.js --compress --mangle --source-map "filename='xhtmlx.min.js.map',url='xhtmlx.min.js.map'"
       - run: npm pack --dry-run
-      - name: Debug auth config
-        run: |
-          echo "npm version: $(npm --version)"
-          echo "node version: $(node --version)"
-          echo "npmrc contents (redacted):"
-          sed 's/_authToken=.*/_authToken=REDACTED/' "$NPM_CONFIG_USERCONFIG" 2>/dev/null || echo "no npmrc"
-          echo "NODE_AUTH_TOKEN set: ${NODE_AUTH_TOKEN:+yes}"
       - name: Publish with provenance
-        run: npm publish --provenance --access public --loglevel verbose
+        run: |
+          sed -i '/_authToken/d' "$NPM_CONFIG_USERCONFIG"
+          npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ''
