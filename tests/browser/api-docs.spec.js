@@ -3,7 +3,7 @@ const { test, expect } = require("@playwright/test");
 test.describe("API Reference docs", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/api/");
-    await page.waitForTimeout(1000);
+    await page.waitForSelector("nav a, .sidebar a, [class*='sidebar'] a", { timeout: 5000 });
   });
 
   test("page loads with title", async ({ page }) => {
@@ -104,21 +104,18 @@ test.describe("API Reference docs", () => {
     const searchInput = page.locator("input[type='search'], input[type='text'][placeholder*='earch' i], #search, .search-input").first();
     if (await searchInput.count() > 0) {
       await searchInput.fill("websocket");
-      await page.waitForTimeout(500);
-      // xh-ws section should be visible, unrelated sections hidden
       const wsSection = page.locator("#xh-ws, [id*='ws']").first();
       if (await wsSection.count() > 0) {
-        await expect(wsSection).toBeVisible();
+        await expect(wsSection).toBeVisible({ timeout: 3000 });
       }
     }
   });
 
   test("anchor links work for direct navigation", async ({ page }) => {
     await page.goto("/api/#xh-get");
-    await page.waitForTimeout(500);
     const heading = page.locator("#xh-get, h2:has-text('xh-get'), h3:has-text('xh-get')").first();
     if (await heading.count() > 0) {
-      await expect(heading).toBeVisible();
+      await expect(heading).toBeVisible({ timeout: 3000 });
     }
   });
 
@@ -126,7 +123,7 @@ test.describe("API Reference docs", () => {
     const errors = [];
     page.on("pageerror", err => errors.push(err.message));
     await page.goto("/api/");
-    await page.waitForTimeout(2000);
+    await page.waitForSelector("nav a, .sidebar a, [class*='sidebar'] a", { timeout: 5000 });
     const critical = errors.filter(e => !e.includes("favicon"));
     expect(critical).toEqual([]);
   });

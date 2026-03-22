@@ -81,7 +81,6 @@ test.describe("Playground", () => {
   test("Run button triggers preview render", async ({ page }) => {
     await page.locator("#codeEditor").fill('<div xh-get="/api/users" xh-trigger="load"><template><div xh-each="users"><span class="test-name" xh-text="name"></span></div></template></div>');
     await page.locator("#btnRun").click();
-    await page.waitForTimeout(1500);
 
     const iframe = page.frameLocator("#previewIframe");
     await expect(iframe.locator(".test-name").first()).toBeVisible({ timeout: 5000 });
@@ -91,10 +90,9 @@ test.describe("Playground", () => {
 
   test("preview renders user list from mock API", async ({ page }) => {
     await page.locator("#exampleSelect").selectOption("basic-get");
-    await page.waitForTimeout(2000);
 
     const iframe = page.frameLocator("#previewIframe");
-    // The basic-get example should render users from the mock API
+    await expect(iframe.locator("body")).not.toBeEmpty({ timeout: 5000 });
     const body = await iframe.locator("body").innerHTML();
     expect(body.length).toBeGreaterThan(10);
   });
@@ -114,28 +112,24 @@ test.describe("Playground", () => {
 
   test("editing code auto-runs preview after debounce", async ({ page }) => {
     await page.locator("#codeEditor").fill("<p>Hello xhtmlx</p>");
-    // Wait for debounce (500ms) + render
-    await page.waitForTimeout(1500);
 
     const iframe = page.frameLocator("#previewIframe");
-    await expect(iframe.locator("p")).toHaveText("Hello xhtmlx");
+    await expect(iframe.locator("p")).toHaveText("Hello xhtmlx", { timeout: 5000 });
   });
 
   test("Ctrl+Enter runs preview immediately", async ({ page }) => {
     await page.locator("#codeEditor").fill("<h1>Instant</h1>");
     await page.locator("#codeEditor").press("Control+Enter");
-    await page.waitForTimeout(500);
 
     const iframe = page.frameLocator("#previewIframe");
-    await expect(iframe.locator("h1")).toHaveText("Instant");
+    await expect(iframe.locator("h1")).toHaveText("Instant", { timeout: 5000 });
   });
 
   test("share button updates URL hash", async ({ page }) => {
     await page.locator("#codeEditor").fill("<div>share-test</div>");
     await page.locator("#btnRun").click();
-    await page.waitForTimeout(500);
     await page.locator("#btnShare").click();
-    await page.waitForTimeout(500);
+    await page.waitForFunction(() => window.location.hash.length > 5, { timeout: 5000 });
 
     const url = page.url();
     expect(url).toContain("#");
@@ -144,20 +138,23 @@ test.describe("Playground", () => {
   });
 
   test("theme toggle switches between dark and light", async ({ page }) => {
-    // Check initial theme
     const initialBg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
-
     await page.locator("#btnTheme").click();
-    await page.waitForTimeout(300);
-
+    await page.waitForFunction(
+      (bg) => getComputedStyle(document.body).backgroundColor !== bg,
+      initialBg,
+      { timeout: 3000 }
+    );
     const newBg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
     expect(newBg).not.toBe(initialBg);
   });
 
   test("line numbers update with editor content", async ({ page }) => {
     await page.locator("#codeEditor").fill("line1\nline2\nline3\nline4\nline5");
-    await page.waitForTimeout(600);
-
+    await page.waitForFunction(
+      () => document.getElementById("lineNumbers").innerHTML.includes(">5<"),
+      { timeout: 3000 }
+    );
     const lineNumbers = await page.locator("#lineNumbers").innerHTML();
     expect(lineNumbers).toContain(">1<");
     expect(lineNumbers).toContain(">5<");
@@ -166,11 +163,7 @@ test.describe("Playground", () => {
   test("preview background toggle works", async ({ page }) => {
     const toggle = page.locator("#previewBgToggle");
     await toggle.click();
-    await page.waitForTimeout(500);
-
-    // Click again to toggle back
     await toggle.click();
-    await page.waitForTimeout(500);
     // No crash = pass
   });
 
@@ -181,11 +174,11 @@ test.describe("Playground", () => {
       '</div>'
     );
     await page.locator("#btnRun").click();
-    await page.waitForTimeout(2000);
 
     const iframe = page.frameLocator("#previewIframe");
+    await expect(iframe.locator(".user-item").first()).toBeVisible({ timeout: 5000 });
     const count = await iframe.locator(".user-item").count();
-    expect(count).toBeGreaterThanOrEqual(2); // Users from mock API
+    expect(count).toBeGreaterThanOrEqual(2);
   });
 
   test("xh-if conditionally renders in preview", async ({ page }) => {
@@ -196,15 +189,14 @@ test.describe("Playground", () => {
       '</div></template></div>'
     );
     await page.locator("#btnRun").click();
-    await page.waitForTimeout(2000);
 
     const iframe = page.frameLocator("#previewIframe");
+    await expect(iframe.locator(".admin-badge").first()).toBeVisible({ timeout: 5000 });
     const badges = await iframe.locator(".admin-badge").count();
     expect(badges).toBeGreaterThan(0);
   });
 
   test("mock API editor changes affect preview", async ({ page }) => {
-    // Switch to mock tab and change the users response
     await page.locator("#tabMock").click();
     const mockEditor = page.locator("#mockEditor");
     await mockEditor.fill(JSON.stringify({
@@ -213,16 +205,12 @@ test.describe("Playground", () => {
         body: { users: [{ id: 1, name: "CustomUser", email: "custom@test.com", role: "tester" }] }
       }
     }, null, 2));
-    await page.waitForTimeout(500);
 
-    // Switch back to HTML and load basic-get example
     await page.locator("#tabHtml").click();
     await page.locator("#exampleSelect").selectOption("basic-get");
-    await page.waitForTimeout(2000);
 
     const iframe = page.frameLocator("#previewIframe");
-    const body = await iframe.locator("body").innerHTML();
-    expect(body).toContain("CustomUser");
+    await expect(iframe.locator("body")).toContainText("CustomUser", { timeout: 5000 });
   });
 
   test("no console errors on page load", async ({ page }) => {
@@ -230,9 +218,8 @@ test.describe("Playground", () => {
     page.on("pageerror", (err) => errors.push(err.message));
 
     await page.goto("/playground/");
-    await page.waitForTimeout(2000);
+    await page.waitForFunction(() => window.__playgroundReady === true, { timeout: 10000 });
 
-    // Filter out known non-critical errors (SW registration in test env)
     const critical = errors.filter(e => !e.includes("ServiceWorker") && !e.includes("sw.js"));
     expect(critical).toEqual([]);
   });

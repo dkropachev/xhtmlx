@@ -2,8 +2,9 @@ const { defineConfig } = require("@playwright/test");
 
 module.exports = defineConfig({
   testDir: "./tests/browser",
-  timeout: 30000,
-  retries: 1,
+  timeout: 15000,
+  retries: 0,
+  workers: "75%",
   use: {
     headless: true,
     baseURL: "http://localhost:3333",

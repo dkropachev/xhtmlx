@@ -35,7 +35,10 @@ test.describe("Core features", () => {
     await page.click("#settle-btn");
     await page.waitForSelector(".settle-item", { timeout: 5000 });
     // After settling (two rAF cycles), xh-settled should be present
-    await page.waitForTimeout(200);
+    await page.waitForFunction(
+      () => document.querySelector(".settle-item")?.classList.contains("xh-settled"),
+      { timeout: 3000 }
+    );
     const hasSettled = await page.locator(".settle-item").first().evaluate(el => el.classList.contains("xh-settled"));
     expect(hasSettled).toBe(true);
   });

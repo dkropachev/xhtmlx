@@ -23,71 +23,95 @@ test.describe("Tutorial page", () => {
   });
 
   test("step 1: GET loads task list", async ({ page }) => {
-    // Wait for tasks to render (mock API + xhtmlx processing)
-    await page.waitForTimeout(3000);
+    // Wait for tasks to actually render
+    await page.waitForFunction(
+      () => document.body.innerHTML.includes("Learn xhtmlx") ||
+            document.querySelector(".task-item, .task-title") !== null,
+      { timeout: 10000 }
+    );
     const body = await page.locator("body").innerHTML();
-    // The mock API has tasks with these titles
     const hasTasks = body.includes("Learn xhtmlx") || body.includes("task-item") || body.includes("task-title");
     expect(hasTasks).toBe(true);
   });
 
   test("step 2: data binding renders task fields", async ({ page }) => {
-    await page.waitForTimeout(2000);
-    // Should have task titles and descriptions rendered via xh-text
+    await page.waitForFunction(
+      () => document.body.innerHTML.includes("Learn xhtmlx"),
+      { timeout: 10000 }
+    );
     const body = await page.locator("body").innerHTML();
     expect(body).toContain("Learn xhtmlx");
   });
 
   test("step 3: conditionals show/hide elements", async ({ page }) => {
-    await page.waitForTimeout(2000);
+    await page.waitForFunction(
+      () => document.body.innerHTML.includes("Learn xhtmlx"),
+      { timeout: 10000 }
+    );
     const body = await page.locator("body").innerHTML();
-    // "Learn xhtmlx" is completed=true, should have a completed indicator
-    // "Build a task manager" is completed=false, should not
     expect(body.length).toBeGreaterThan(1000);
   });
 
   test("step 4: page has a create form with POST", async ({ page }) => {
-    await page.waitForTimeout(2000);
+    await page.waitForFunction(
+      () => document.body.innerHTML.includes("xh-post"),
+      { timeout: 10000 }
+    );
     const body = await page.locator("body").innerHTML();
-    // The tutorial should have a form that creates tasks
     expect(body).toContain("xh-post");
     expect(body).toContain("/api/tasks");
   });
 
   test("step 6: DELETE removes a task", async ({ page }) => {
-    await page.waitForTimeout(2000);
-    // Find delete buttons
+    await page.waitForFunction(
+      () => document.body.innerHTML.includes("Learn xhtmlx"),
+      { timeout: 10000 }
+    );
     const deleteBtn = page.locator("button:has-text('Delete'), button:has-text('Remove'), [class*='delete']").first();
     if (await deleteBtn.count() > 0) {
       const beforeCount = await page.locator(".task-item, .task-card, [class*='task']").count();
       await deleteBtn.click();
-      await page.waitForTimeout(1500);
+      // Wait for DOM to update after delete
+      await page.waitForFunction(
+        (prev) => document.querySelectorAll(".task-item, .task-card, [class*='task']").length <= prev,
+        beforeCount,
+        { timeout: 5000 }
+      );
       const afterCount = await page.locator(".task-item, .task-card, [class*='task']").count();
-      // Should have fewer tasks (or at least not crash)
       expect(afterCount).toBeLessThanOrEqual(beforeCount);
     }
   });
 
   test("step 7: search filters results", async ({ page }) => {
-    await page.waitForTimeout(2000);
+    await page.waitForFunction(
+      () => document.body.innerHTML.includes("Learn xhtmlx"),
+      { timeout: 10000 }
+    );
     const searchInput = page.locator("input[type='text'][placeholder*='earch' i], input[xh-get*='search' i], input[type='search']").first();
     if (await searchInput.count() > 0) {
       await searchInput.pressSequentially("Learn", { delay: 50 });
-      await page.waitForTimeout(1000);
-      // Results should be filtered
+      // Wait for search results to update
+      await page.waitForFunction(
+        () => document.body.innerHTML.includes("Learn"),
+        { timeout: 5000 }
+      );
       const body = await page.locator("body").innerHTML();
       expect(body).toContain("Learn");
     }
   });
 
   test("step 9: error handling shows error template", async ({ page }) => {
-    await page.waitForTimeout(2000);
-    // Find the error trigger button
+    await page.waitForFunction(
+      () => document.body.innerHTML.includes("Learn xhtmlx"),
+      { timeout: 10000 }
+    );
     const errorBtn = page.locator("button:has-text('error'), button:has-text('Error'), button:has-text('Fail'), [xh-get*='error']").first();
     if (await errorBtn.count() > 0) {
       await errorBtn.click();
-      await page.waitForTimeout(1500);
-      // Should show error content
+      await page.waitForFunction(
+        () => document.body.innerHTML.toLowerCase().includes("error"),
+        { timeout: 5000 }
+      );
       const body = await page.locator("body").innerHTML();
       expect(body.toLowerCase()).toContain("error");
     }
@@ -98,18 +122,14 @@ test.describe("Tutorial page", () => {
     const count = await viewSourceBtns.count();
     expect(count).toBeGreaterThan(0);
 
-    // Click first view source button
     await viewSourceBtns.first().click();
-    await page.waitForTimeout(300);
-
-    // Some code block should now be visible
     const codeBlocks = page.locator("pre, code, .source-code");
+    await expect(codeBlocks.first()).toBeVisible({ timeout: 3000 });
     const visibleCode = await codeBlocks.count();
     expect(visibleCode).toBeGreaterThan(0);
   });
 
   test("progress bar exists and tracks scroll", async ({ page }) => {
-    // Check progress bar exists
     const progressBar = page.locator(".progress-bar, .progress, [class*='progress']").first();
     expect(await progressBar.count()).toBeGreaterThan(0);
   });
@@ -119,7 +139,7 @@ test.describe("Tutorial page", () => {
     page.on("pageerror", err => errors.push(err.message));
 
     await page.goto("/tutorial/");
-    await page.waitForTimeout(5000);
+    await page.waitForFunction(() => window.__xhtmlxLoaded === true, { timeout: 15000 });
 
     const critical = errors.filter(e =>
       !e.includes("ServiceWorker") &&
