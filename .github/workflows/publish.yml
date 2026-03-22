@@ -26,7 +26,13 @@ jobs:
       - run: npm pack --dry-run
       - name: Publish with provenance
         run: |
-          sed -i '/_authToken/d' "$NPM_CONFIG_USERCONFIG"
+          echo "=== Debug ==="
+          echo "npm: $(npm --version)"
+          echo "node: $(node --version)"
+          cat "$NPM_CONFIG_USERCONFIG" 2>/dev/null | sed 's/=.*/=REDACTED/' || echo "no npmrc"
+          echo "NODE_AUTH_TOKEN length: ${#NODE_AUTH_TOKEN}"
+          echo "=== Stripping token and publishing ==="
+          sed -i '/_authToken/d' "$NPM_CONFIG_USERCONFIG" 2>/dev/null || true
+          unset NODE_AUTH_TOKEN
+          cat "$NPM_CONFIG_USERCONFIG" 2>/dev/null || echo "no npmrc after strip"
           npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ''
